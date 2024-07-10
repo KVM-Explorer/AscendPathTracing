@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+.xmake
+build
+add_cpu
+add_npu
+input
+output
+npuchk
+cceprint
