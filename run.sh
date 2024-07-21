@@ -107,7 +107,6 @@ cmake -B build                            \
     -DASCEND_CORE_TYPE=${CORE_TYPE}       \
     -DASCEND_RUN_MODE=${RUN_MODE}         \
     -DASCEND_INSTALL_PATH=${_ASCEND_INSTALL_PATH} \
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=1
 
 cmake --build build --target ${FILE_NAME}_${RUN_MODE}
 if [ $? -ne 0 ]; then
@@ -116,6 +115,7 @@ if [ $? -ne 0 ]; then
 fi
 echo "INFO: compile op on ${RUN_MODE} succeed!"
 
+mkdir -p input output
 rm -rf input/*.bin output/*.bin
 python3 scripts/gen_data.py
 (export LD_LIBRARY_PATH=${_ASCEND_INSTALL_PATH}/tools/simulator/${_SOC_VERSION}/lib:$LD_LIBRARY_PATH && ./${FILE_NAME}_${RUN_MODE})

@@ -38,3 +38,5 @@ input
 output
 npuchk
 cceprint
+.vscode
+render_cpu
