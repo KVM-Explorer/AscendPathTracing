@@ -1,3 +1,7 @@
+
+-- import("package.manager.pkgconfig.find_package", {alias = "find_package_from_pkgconfig"})
+-- import("lib.detect.tools.find_cmake", {alias = "find_cmake"})
+-- import("package.manager.cmake.find_package", {alias = "find_package_from_cmake"})
 toolchain("cpu")
 
     set_kind("standalone")
@@ -20,22 +24,24 @@ toolchain("cpu")
     end)
 
     on_load(function (toolchain)
-        local gcc = toolchain:find_tool("gcc")
-        if gcc then
-            toolchain:add("cxflags", "-g")
-        end
+        -- local gcc = toolchain:find_tool("gcc")
+        -- if gcc then
+        toolchain:add("cxflags", "-g")
+        -- end
 
-        local cmake = toolchain:find_package("cmake")
-        if cmake then
-            local tikicpulib_name = "tikicpulib::" .. _OPTIONS["ASCEND_PRODUCT_TYPE"]
-            if is_plat("windows") then
-                tikicpulib_name = tikicpulib_name .. ".lib"
-            else
-                tikicpulib_name = "-l" .. tikicpulib_name
-            end
-            toolchain:add("links", tikicpulib_name)
-        end
+        -- local cmake = import("package.tools.cmake")
+        -- if cmake then
+        --     local tikicpulib_name = "tikicpulib::" .. "Ascend310P1"
+        --     if is_plat("windows") then
+        --         tikicpulib_name = tikicpulib_name .. ".lib"
+        --     else
+        --         tikicpulib_name = "-l" .. tikicpulib_name
+        --     end
+        --     toolchain:add("links", tikicpulib_name)
+        -- end
 
+
+        
         toolchain:add("links", "ascendcl")
         toolchain:add("includedirs", "${ASCEND_INSTALL_PATH}/acllib/include")
         toolchain:add("linkdirs", "${ASCEND_INSTALL_PATH}/tools/tikicpulib/lib")
@@ -50,4 +56,3 @@ toolchain("cpu")
             os.exec("rm -rf build && mkdir build")
         end)
     end)
-toolchain_end()
