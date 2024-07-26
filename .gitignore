@@ -40,3 +40,4 @@ npuchk
 cceprint
 .vscode
 render_cpu
+*.log
