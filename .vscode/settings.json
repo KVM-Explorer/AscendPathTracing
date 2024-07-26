@@ -1,0 +1,18 @@
+{
+    "clangd.arguments": [
+        "--compile-commands-dir=.vscode",
+        "--header-insertion-decorators",
+        "--header-insertion=never",
+        "--completion-style=bundled",
+        "-j=4",
+        "--background-index",
+        "--pch-storage=memory",
+        "--log=verbose",
+        "--all-scopes-completion",
+        "--pretty",
+        "--function-arg-placeholders=false",
+        "--header-insertion-decorators",
+        "--all-scopes-completion",
+        "--cross-file-rename"
+      ]
+}

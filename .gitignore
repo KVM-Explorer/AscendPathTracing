@@ -38,6 +38,8 @@ input
 output
 npuchk
 cceprint
-.vscode
+.vscode/.cache  
+.vscode/compile_commands.json
+
 render_cpu
 *.log
