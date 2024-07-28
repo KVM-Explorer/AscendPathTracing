@@ -11,8 +11,6 @@ constexpr int32_t TILING_NUM = 8;                                         // cus
 constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
 constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
 
-
-
 class KernelRender {
 
   public:
@@ -107,26 +105,27 @@ class KernelRender {
 
         // count
         int32_t count = TILING_LENGTH;
+        RayLocalSoA rays;
+        rays.ox = ray[TILING_LENGTH * 0];
+        rays.oy = ray[TILING_LENGTH * 1];
+        rays.oz = ray[TILING_LENGTH * 2];
+        rays.dx = ray[TILING_LENGTH * 3];
+        rays.dy = ray[TILING_LENGTH * 4];
+        rays.dz = ray[TILING_LENGTH * 5];
 
-        LocalTensor<Float> rayX = ray[TILING_LENGTH * 0];
-        LocalTensor<Float> rayY = ray[TILING_LENGTH * 1];
-        LocalTensor<Float> rayZ = ray[TILING_LENGTH * 2];
-        LocalTensor<Float> rayDX = ray[TILING_LENGTH * 3];
-        LocalTensor<Float> rayDY = ray[TILING_LENGTH * 4];
-        LocalTensor<Float> rayDZ = ray[TILING_LENGTH * 5];
-
-        LocalTensor<Float> colorX = color[TILING_LENGTH * 0];
-        LocalTensor<Float> colorY = color[TILING_LENGTH * 1];
-        LocalTensor<Float> colorZ = color[TILING_LENGTH * 2];
+        VecLocalSoA colors;
+        colors.x = color[TILING_LENGTH * 0];
+        colors.y = color[TILING_LENGTH * 1];
+        colors.z = color[TILING_LENGTH * 2];
 
         // generate color
-        Add(colorX, rayX, rayDX, count);
-        Add(colorY, rayY, rayDY, count);
-        Add(colorZ, rayZ, rayDZ, count);
+        Add(colors.x, rays.ox, rays.dx, count);
+        Add(colors.y, rays.oy, rays.dy, count);
+        Add(colors.z, rays.oz, rays.dz, count);
 
-        Mins(colorX, colorX, 1.0f, count);
-        Mins(colorY, colorY, 1.0f, count);
-        Mins(colorZ, colorZ, 1.0f, count);
+        Mins(colors.x, colors.x, 1.0f, count);
+        Mins(colors.y, colors.y, 1.0f, count);
+        Mins(colors.z, colors.z, 1.0f, count);
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
@@ -156,10 +155,6 @@ class KernelRender {
     // global
     RaySoA inputRays;
     VecSoA resultColor;
-
-    // local
-    RayLocalSoA rays;
-    VecLocalSoA colors;
 
     // 输入队列
     TQue<QuePosition::VECIN, BUFFER_NUM> rayQueue;
