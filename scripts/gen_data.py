@@ -27,12 +27,27 @@ def gen_rays(w, h, s):
                             cy * ((sy + 0.5 + dy) / 2 + j) / h - 0.5 + \
                             camera[1]
                         rays.append(np.array([camera[0], (d / np.linalg.norm(d)) * 140]))
-    rays = np.array(rays).reshape(-1, 3)
-    # 将原有每个ray的xyz—>xyzw，w=0 保证数据是32B的倍数
-    rays = np.concatenate([rays[:, :3], np.zeros((rays.shape[0], 1)), rays[:, 3:]], axis=1)
-    print(rays.shape)
-    rays.astype(np.float32).tofile("./input/rays.bin")
+    
+    #===AoS===
+    # rays = np.array(rays).reshape(-1, 3)
+    # # 将原有每个ray的xyz—>xyzw，w=0 保证数据是32B的倍数
+    # rays = np.concatenate([rays[:, :3], np.zeros((rays.shape[0], 1)), rays[:, 3:]], axis=1)
+    
+    # print(rays.shape)
 
+
+    # # rays 的 xyzw 按照SoA的方式存储
+    # rays = rays.T
+
+
+    # ===SOA===
+    # ray xyz dx dy dz
+    rays = np.array(rays).reshape(-1, 6)
+    # print(rays.shape)
+    rays = rays.T
+
+    rays.astype(np.float32).tofile("./input/rays.bin")
+    # print(rays.shape)
 
 
 if __name__ == "__main__":

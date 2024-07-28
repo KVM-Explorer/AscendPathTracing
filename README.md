@@ -19,5 +19,9 @@ NPU版本的算子无法支持常见系统库函数，CCE编译器缺少对应�
 
 ```bash
   bash run.sh -r [RUN_MODE] -v  [SOC_VERSION] 
-  bash run.sh -r cpu -v Ascend910B
+  bash run.sh -r cpu -v Ascend310P1
 ```
+
+## TODO
+
+- 迁移到xmake,便于调试和运行

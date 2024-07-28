@@ -18,8 +18,8 @@ int main() {
 
 #ifdef __CCE_KT_TEST__
 
-    size_t inputByteSize = elementNums * sizeof(uint32_t) * 8;
-    size_t outputByteSize = elementNums * sizeof(uint32_t) * 4;
+    size_t inputByteSize = elementNums * sizeof(uint32_t) * 6;
+    size_t outputByteSize = elementNums * sizeof(uint32_t) * 3;
 
     uint8_t *rays = (uint8_t *)AscendC::GmAlloc(inputByteSize);
     uint8_t *colors = (uint8_t *)AscendC::GmAlloc(outputByteSize);
@@ -37,8 +37,8 @@ int main() {
     AscendC::GmFree((void *)colors);
 
 #else
-    size_t inputByteSize = elementNums * sizeof(uint32_t) * 8; //
-    size_t outputByteSize = elementNums * sizeof(uint32_t) * 4;
+    size_t inputByteSize = elementNums * sizeof(uint32_t) * 6; //
+    size_t outputByteSize = elementNums * sizeof(uint32_t) * 3;
 
     aclrtContext context;
     int32_t deviceId = 0;

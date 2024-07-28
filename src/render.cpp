@@ -5,11 +5,13 @@ using namespace AscendC;
 using namespace std;
 
 constexpr int32_t TOTAL_NUM = WIDTH * HEIGHT * SAMPLES * 4;
-constexpr int32_t USE_CORE_NUM = 8;
-constexpr int32_t BLOCK_LENGTH = TOTAL_NUM / USE_CORE_NUM;
-constexpr int32_t TILING_NUM = 8;
-constexpr int32_t BUFFER_NUM = 2;
-constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM;
+constexpr int32_t USE_CORE_NUM = 8;                                       // device core num
+constexpr int32_t BLOCK_LENGTH = TOTAL_NUM / USE_CORE_NUM;                // 每个block处理的数据量(非字节数)
+constexpr int32_t TILING_NUM = 8;                                         // custom config
+constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
+constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
+
+
 
 class KernelRender {
 
@@ -21,14 +23,15 @@ class KernelRender {
         height = h;
         samples = s;
 
-        constexpr int32_t block_length = TOTAL_NUM / USE_CORE_NUM;
-        int32_t block_offset = block_length * GetBlockIdx();
+        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx();
 
-        InitRaySoA(inputRays, r, block_offset, block_length);
-        InitColorSoA(resultColor, output, block_offset, block_length);
+        InitRaySoA(inputRays, r, block_offset, BLOCK_LENGTH);
+        InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
 
-        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6); // ray xyz dxdydz = 6
-        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3); // color xyz = 3
+        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);   // ray xyz dxdydz = 6
+        pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3); // color xyz = 3
+
+        // printf("rayQueue Length: %d\n", TILING_LENGTH * 6);
     }
 
     __aicore__ inline void Process() {
@@ -46,9 +49,11 @@ class KernelRender {
     }
 
   private:
-    // system mem -> device mem
+    // system mem -> device memory
     __aicore__ inline void CopyIn(int32_t progress) {
         LocalTensor<Float> ray = rayQueue.AllocTensor<Float>();
+
+        // printf("ray length: %d\n", ray.GetLength());
 
         // offset
         int32_t r_x = TILING_LENGTH * 0;
@@ -57,6 +62,32 @@ class KernelRender {
         int32_t r_dx = TILING_LENGTH * 3;
         int32_t r_dy = TILING_LENGTH * 4;
         int32_t r_dz = TILING_LENGTH * 5;
+
+        // printf("r_x: %d\n", r_x);
+        // printf("r_y: %d\n", r_y);
+        // printf("r_z: %d\n", r_z);
+        // printf("r_dx: %d\n", r_dx);
+        // printf("r_dy: %d\n", r_dy);
+        // printf("r_dz: %d\n", r_dz);
+
+        // printf("progress: %d\n", progress);
+
+        // Print the address of the destination buffer
+        // printf("Dst Addr: ray[r_x]: %ld\n", ray[r_x].GetLocalBufferAddr());
+        // printf("Dst Addr: ray[r_y]: %ld\n", ray[r_y].GetLocalBufferAddr());
+        // printf("Dst Addr: ray[r_z]: %ld\n", ray[r_z].GetLocalBufferAddr());
+        // printf("Dst Addr: ray[r_dx]: %ld\n", ray[r_dx].GetLocalBufferAddr());
+        // printf("Dst Addr: ray[r_dy]: %ld\n", ray[r_dy].GetLocalBufferAddr());
+        // printf("Dst Addr: ray[r_dz]: %ld\n", ray[r_dz].GetLocalBufferAddr());
+
+        // Print the src address
+        // printf("current progress index: %d\n", progress * TILING_LENGTH);
+        // printf("Src Addr: inputRays.ox: %p\n", inputRays.ox[progress * TILING_LENGTH].GetPhyAddr());
+        // printf("Src Addr: inputRays.oy: %p\n", inputRays.oy[progress * TILING_LENGTH].GetPhyAddr());
+        // printf("Src Addr: inputRays.oz: %p\n", inputRays.oz[progress * TILING_LENGTH].GetPhyAddr());
+        // printf("Src Addr: inputRays.dx: %p\n", inputRays.dx[progress * TILING_LENGTH].GetPhyAddr());
+        // printf("Src Addr: inputRays.dy: %p\n", inputRays.dy[progress * TILING_LENGTH].GetPhyAddr());
+        // printf("Src Addr: inputRays.dz: %p\n", inputRays.dz[progress * TILING_LENGTH].GetPhyAddr());
 
         DataCopy(ray[r_x], inputRays.ox[progress * TILING_LENGTH], TILING_LENGTH);
         DataCopy(ray[r_y], inputRays.oy[progress * TILING_LENGTH], TILING_LENGTH);
@@ -68,7 +99,7 @@ class KernelRender {
         rayQueue.EnQue(ray);
     }
 
-    // read device mem & compute & output to device queue & all samples
+    // read device memory & compute & output to device queue & all samples
     __aicore__ inline void Compute(int32_t progress) {
 
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
