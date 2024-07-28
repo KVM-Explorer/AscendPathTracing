@@ -11,8 +11,6 @@ constexpr int32_t TILING_NUM = 8;                                         // cus
 constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
 constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
 
-
-
 class KernelRender {
 
   public:
@@ -23,15 +21,37 @@ class KernelRender {
         height = h;
         samples = s;
 
-        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx();
-
-        InitRaySoA(inputRays, r, block_offset, BLOCK_LENGTH);
-        InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
+        InitRaySoA(r);
+        InitColorSoA(output);
 
         pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);   // ray xyz dxdydz = 6
         pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3); // color xyz = 3
 
         // printf("rayQueue Length: %d\n", TILING_LENGTH * 6);
+    }
+
+    __aicore__ inline void InitRaySoA(GM_ADDR r) {
+        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx();
+
+        int32_t ray_count = WIDTH * HEIGHT * SAMPLES * 4;
+        int32_t ray_offset = ray_count;
+
+        inputRays_ox.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 0 + block_offset, BLOCK_LENGTH);
+        inputRays_oy.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 1 + block_offset, BLOCK_LENGTH);
+        inputRays_oz.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 2 + block_offset, BLOCK_LENGTH);
+        inputRays_dx.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 3 + block_offset, BLOCK_LENGTH);
+        inputRays_dy.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 4 + block_offset, BLOCK_LENGTH);
+        inputRays_dz.SetGlobalBuffer((__gm__ Float *)r + ray_offset * 5 + block_offset, BLOCK_LENGTH);
+    }
+
+    __aicore__ inline void InitColorSoA(GM_ADDR output) {
+        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx();
+        int32_t color_count = WIDTH * HEIGHT * SAMPLES * 4;
+        int32_t color_offset = color_count;
+
+        resultColor_x.SetGlobalBuffer((__gm__ Float *)output + color_offset * 0 + block_offset, BLOCK_LENGTH);
+        resultColor_y.SetGlobalBuffer((__gm__ Float *)output + color_offset * 1 + block_offset, BLOCK_LENGTH);
+        resultColor_z.SetGlobalBuffer((__gm__ Float *)output + color_offset * 2 + block_offset, BLOCK_LENGTH);
     }
 
     __aicore__ inline void Process() {
@@ -89,12 +109,12 @@ class KernelRender {
         // printf("Src Addr: inputRays.dy: %p\n", inputRays.dy[progress * TILING_LENGTH].GetPhyAddr());
         // printf("Src Addr: inputRays.dz: %p\n", inputRays.dz[progress * TILING_LENGTH].GetPhyAddr());
 
-        DataCopy(ray[r_x], inputRays.ox[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_y], inputRays.oy[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_z], inputRays.oz[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dx], inputRays.dx[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dy], inputRays.dy[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dz], inputRays.dz[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_x], inputRays_ox[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_y], inputRays_oy[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_z], inputRays_oz[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_dx], inputRays_dx[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_dy], inputRays_dy[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_dz], inputRays_dz[progress * TILING_LENGTH], TILING_LENGTH);
 
         rayQueue.EnQue(ray);
     }
@@ -141,9 +161,9 @@ class KernelRender {
         int32_t c_y = TILING_LENGTH * 1;
         int32_t c_z = TILING_LENGTH * 2;
 
-        DataCopy(resultColor.x[progress * TILING_LENGTH], color[c_x], TILING_LENGTH);
-        DataCopy(resultColor.y[progress * TILING_LENGTH], color[c_y], TILING_LENGTH);
-        DataCopy(resultColor.z[progress * TILING_LENGTH], color[c_z], TILING_LENGTH);
+        DataCopy(resultColor_x[progress * TILING_LENGTH], color[c_x], TILING_LENGTH);
+        DataCopy(resultColor_y[progress * TILING_LENGTH], color[c_y], TILING_LENGTH);
+        DataCopy(resultColor_z[progress * TILING_LENGTH], color[c_z], TILING_LENGTH);
 
         colorQueue.FreeTensor(color);
     }
@@ -154,12 +174,12 @@ class KernelRender {
     int samples;
 
     // global
-    RaySoA inputRays;
-    VecSoA resultColor;
-
-    // local
-    RayLocalSoA rays;
-    VecLocalSoA colors;
+    // [[deprecated("Can't construct a struct contain LocalTensor or Global Tensor")]]
+    // RaySoA inputRays;
+    GlobalTensor<Float> inputRays_ox, inputRays_oy, inputRays_oz, inputRays_dx, inputRays_dy, inputRays_dz;
+    // [[deprecated("Can't construct a struct contain LocalTensor or Global Tensor")]]
+    // VecSoA resultColor;
+    GlobalTensor<Float> resultColor_x, resultColor_y, resultColor_z;
 
     // 输入队列
     TQue<QuePosition::VECIN, BUFFER_NUM> rayQueue;
@@ -183,3 +203,5 @@ void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uin
     render<<<blockDim, l2ctrl, stream>>>(rays, colors);
 }
 #endif
+
+// 配置指向全局内存的指针

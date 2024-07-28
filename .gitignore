@@ -26,6 +26,10 @@
 *.a
 *.lib
 
+# Simulink cache
+*.idx
+
+
 # Executables
 *.exe
 *.out
@@ -42,4 +46,6 @@ cceprint
 .vscode/compile_commands.json
 
 render_cpu
+render_npu
+render_sim
 *.log
