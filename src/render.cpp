@@ -15,7 +15,7 @@ class KernelRender {
 
   public:
     __aicore__ inline KernelRender() {}
-    __aicore__ inline void Init(int w, int h, int s, GM_ADDR r, GM_ADDR output) {
+    __aicore__ inline void Init(int w, int h, int s, GM_ADDR r,  GM_ADDR output) {
 
         width = w;
         height = h;
@@ -25,6 +25,7 @@ class KernelRender {
 
         InitRaySoA(inputRays, r, block_offset, BLOCK_LENGTH);
         InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
+        // InitSphereSoA);
 
         pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);   // ray xyz dxdydz = 6
         pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3); // color xyz = 3
@@ -35,6 +36,7 @@ class KernelRender {
     __aicore__ inline void Process() {
 
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
+        // UploadSpheres();
         for (int i = 0; i < loop_count; i++) {
             CopyIn(i);
             Compute(i);
@@ -47,9 +49,13 @@ class KernelRender {
     }
 
   private:
+    // upload sphere data to device memory
+    // __aicore__ inline void UploadSpheres() {
+        
+    // }
     // system mem -> device memory
     __aicore__ inline void CopyIn(int32_t progress) {
-        LocalTensor<Float> ray = rayQueue.AllocTensor<Float>();
+        
 
         // printf("ray length: %d\n", ray.GetLength());
 
@@ -161,6 +167,8 @@ class KernelRender {
     // 输出队列
     TQue<QuePosition::VECOUT, BUFFER_NUM> colorQueue;
 
+    TQue<QuePosition::VECIN, BUFFER_NUM> sphereQueue;
+
     TPipe pipe;
 };
 
@@ -174,7 +182,5 @@ extern "C" __global__ __aicore__ void render(GM_ADDR rays, GM_ADDR colors) {
 
 #ifndef __CCE_KT_TEST__
 // call of kernel function
-void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uint8_t *colors) {
-    render<<<blockDim, l2ctrl, stream>>>(rays, colors);
-}
+void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uint8_t *colors) { render<<<blockDim, l2ctrl, stream>>>(rays, colors); }
 #endif
