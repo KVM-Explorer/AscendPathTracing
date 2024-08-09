@@ -46,7 +46,7 @@ def gen_rays(w, h, s):
     # print(rays.shape)
     rays = rays.T
 
-    rays.astype(np.float16).tofile("./input/rays.bin")
+    rays.astype(np.float32).tofile("./input/rays.bin")
     # print(rays.shape)
 
 '''
@@ -83,7 +83,7 @@ def gen_spheres():
     spheres = spheres.T
     # print(spheres.shape)
     # print(spheres)
-    spheres.astype(np.float16).tofile("./input/spheres.bin")
+    spheres.astype(np.float32).tofile("./input/spheres.bin")
 
     
 if __name__ == "__main__":

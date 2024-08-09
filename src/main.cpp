@@ -66,7 +66,7 @@ int main() {
 
     CHECK_ACL(aclrtMalloc((void **)&rayDevice, inputRayByteSize,
                           ACL_MEM_MALLOC_HUGE_FIRST));
-    CHCEK_ACL(aclrtMalloc((void **)&sphereDevice, inputSphereByteSize,
+    CHECK_ACL(aclrtMalloc((void **)&sphereDevice, inputSphereByteSize,
                           ACL_MEM_MALLOC_HUGE_FIRST));
     CHECK_ACL(aclrtMalloc((void **)&colorDevice, outputColorByteSize,
                           ACL_MEM_MALLOC_HUGE_FIRST));
@@ -75,11 +75,11 @@ int main() {
     CHECK_ACL(aclrtMemcpy(rayDevice, inputRayByteSize, rayHost, inputRayByteSize,
                           ACL_MEMCPY_HOST_TO_DEVICE));
 
-    ReadFile("./input/spheres.bin", inputSphereByteSize, rayHost, inputSphereByteSize);
-    CHECK_ACL(aclrtMemcpy(rayDevice, inputSphereByteSize, rayHost, inputSphereByteSize,
+    ReadFile("./input/spheres.bin", inputSphereByteSize, sphereHost, inputSphereByteSize);
+    CHECK_ACL(aclrtMemcpy(rayDevice, inputSphereByteSize, sphereHost, inputSphereByteSize,
                           ACL_MEMCPY_HOST_TO_DEVICE));
 
-    render_do(blockDim, nullptr, stream, rayDevice, colorDevice);
+    render_do(blockDim, nullptr, stream, rayDevice,sphereDevice,colorDevice);
     CHECK_ACL(aclrtSynchronizeStream(stream));
 
     CHECK_ACL(aclrtMemcpy(colorHost, outputColorByteSize, colorDevice,

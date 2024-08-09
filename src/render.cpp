@@ -2,6 +2,7 @@
 #include <cstdint>
 using namespace AscendC;
 #include <cstdlib>
+// #include <lib/matmul_intf.h>
 using namespace std;
 
 constexpr int32_t TOTAL_NUM = WIDTH * HEIGHT * SAMPLES * 4;
@@ -9,7 +10,12 @@ constexpr int32_t USE_CORE_NUM = 8;                                       // dev
 constexpr int32_t BLOCK_LENGTH = TOTAL_NUM / USE_CORE_NUM;                // 每个block处理的数据量(非字节数)
 constexpr int32_t TILING_NUM = 8;                                         // custom config
 constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
-constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数) 
+constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
+
+// using aType =  matmul::MatmulType<TPosition::GM, CubeFormat::ND, Float>;
+// using bType = matmul::MatmulType<TPosition::GM,CubeFormat::ND, Float>;
+// using cType = matmul::MatmulType<TPosition::GM, CubeFormat::ND, Float>;
+// using biasType = matmul::MatmulType<TPosition::GM, CubeFormat::ND, Float>;
 
 class KernelRender {
 
@@ -27,12 +33,16 @@ class KernelRender {
         InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
         inputSpheres.SetGlobalBuffer((__gm__ Float *)spheres, SPHERE_NUM * SPHERE_MEMBER_NUM);
 
-        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);   // ray xyz dxdydz = 6
-        pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3); // color xyz = 3
-        pipe.InitBuffer(sphereQueue,1, SPHERE_NUM * sizeof(Float) * 10); // num * bytes size * member num
+        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);        // ray xyz dxdydz = 6
+        pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3);      // color xyz = 3
+        pipe.InitBuffer(sphereQueue, 1, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
+        pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
-        pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * 10); // num * bytes size * member num
+        pipe.InitBuffer(tmpBuf, SPHERE_NUM * sizeof(Float) * 8);
+        pipe.InitBuffer(maskBuf, SPHERE_NUM * sizeof(uint8_t) * 1);
+
+        // REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(), mm); // 初始化
     }
 
     __aicore__ inline void Process() {
@@ -40,7 +50,6 @@ class KernelRender {
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
 
         UploadSpheres();
-        CopySpheres();
         for (int i = 0; i < loop_count; i++) {
             CopyIn(i);
             Compute(i);
@@ -55,35 +64,10 @@ class KernelRender {
   private:
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
-        LocalTensor<Float> sphereInfo = sphereQueue.AllocTensor<Float>();
-
-        DataCopy(sphereInfo, inputSpheres, SPHERE_NUM * 10);
-
-        sphereQueue.EnQue(sphereInfo);
+        sphereData = sphereBuf.Get<Float>();
+        DataCopy(sphereData, inputSpheres, SPHERE_NUM * 10);
     }
 
-    __aicore__ inline void CopySpheres(){
-        LocalTensor<Float> sphereInput = sphereQueue.DeQue<Float>(); // 320 Bytes, 80 elements of Float  
-
-        LocalTensor<Float> sphereBufData = sphereBuf.Get<Float>();
-
-        uint64_t mask = 1; // Float 1-64 / FP16 1-128
-        // 每次读取连续的256 Bytes数据进行处理(分为8个datablock(32 Bytes))，repeat从1开始
-        CopyRepeatParams params{1,1,8,8}; // 其中repeat stride又是以datablock为单位的，所以stride最大为8
-
-        // 重复拷贝两次，每次拷贝8个datablock，实际数据320 Bytes,冗余拷贝512 - 320 = 192 Bytes
-        Copy(sphereBufData, sphereInput,mask,1,params);
-
-
-        // int32_t local_offset = mask;
-        // int32_t global_offset = mask;
-        // mask = SPHERE_NUM * SPHERE_MEMBER_NUM - 64;
-        // params = {1,1,2,2};
-        // Copy(sphereBufInfo[local_offset],sphereBufInfo[global_offset],mask,1,params);
-
-
-        sphereQueue.FreeTensor(sphereInput);
-    }
     // system mem -> device memory
     __aicore__ inline void CopyIn(int32_t progress) {
         LocalTensor<Float> ray = rayQueue.AllocTensor<Float>();
@@ -112,6 +96,19 @@ class KernelRender {
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
 
+        LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
+
+        LocalTensor<Float> ocX = tmpBuffer[0];
+        LocalTensor<Float> ocY = tmpBuffer[SPHERE_NUM * 1];
+        LocalTensor<Float> ocZ = tmpBuffer[SPHERE_NUM * 2];
+        LocalTensor<Float> tmp1 = tmpBuffer[SPHERE_NUM * 3];
+        LocalTensor<Float> tmp2 = tmpBuffer[SPHERE_NUM * 4];
+        LocalTensor<Float> tmp3 = tmpBuffer[SPHERE_NUM * 5];
+        LocalTensor<Float> b = tmpBuffer[SPHERE_NUM * 6];
+        LocalTensor<Float> c = tmpBuffer[SPHERE_NUM * 7];
+        // LocalTensor<Float> discrPos = tmpBuf.Get<Float>();
+        LocalTensor<uint8_t> mask1 = maskBuf.Get<uint8_t>();// TODO: mask buffer
+
         // count
         int32_t count = TILING_LENGTH;
         RayLocalSoA rays;
@@ -127,14 +124,54 @@ class KernelRender {
         colors.y = color[TILING_LENGTH * 1];
         colors.z = color[TILING_LENGTH * 2];
 
-        // generate color
-        Add(colors.x, rays.ox, rays.dx, count);
-        Add(colors.y, rays.oy, rays.dy, count);
-        Add(colors.z, rays.oz, rays.dz, count);
+        SphereLocalSoA spheres;
+        int sphere_offset = 0;
+        spheres.r2 = sphereData[sphere_offset + SPHERE_NUM * 0];
+        spheres.x = sphereData[sphere_offset + SPHERE_NUM * 1];
+        spheres.y = sphereData[sphere_offset + SPHERE_NUM * 2];
+        spheres.z = sphereData[sphere_offset + SPHERE_NUM * 3];
+        spheres.emissionX = sphereData[sphere_offset + SPHERE_NUM * 4];
+        spheres.emissionY = sphereData[sphere_offset + SPHERE_NUM * 5];
+        spheres.emissionZ = sphereData[sphere_offset + SPHERE_NUM * 6];
+        spheres.colorX = sphereData[sphere_offset + SPHERE_NUM * 7];
+        spheres.colorY = sphereData[sphere_offset + SPHERE_NUM * 8];
+        spheres.colorZ = sphereData[sphere_offset + SPHERE_NUM * 9];
 
-        Mins(colors.x, colors.x, Float(1.0f) , count);
-        Mins(colors.y, colors.y,Float(1.0f), count);
-        Mins(colors.z, colors.z, Float(1.0f), count);
+        // generate color
+        // Add(colors.x, rays.ox, rays.dx, count);
+        // Add(colors.y, rays.oy, rays.dy, count);
+        // Add(colors.z, rays.oz, rays.dz, count);
+
+        // Mins(colors.x, colors.x, Float(1.0f) , count);
+        // Mins(colors.y, colors.y,Float(1.0f), count);
+        // Mins(colors.z, colors.z, Float(1.0f), count);
+
+        for (int i = 0; i < count; i++) {
+            Adds(ocX, spheres.x, rays.ox.GetValue(i), SPHERE_NUM);
+            Adds(ocY, spheres.y, rays.oy.GetValue(i), SPHERE_NUM);
+            Adds(ocZ, spheres.z, rays.oz.GetValue(i), SPHERE_NUM);
+
+            Muls(tmp1, ocX, rays.ox.GetValue(i), SPHERE_NUM);
+            Muls(tmp2, ocY, rays.oy.GetValue(i), SPHERE_NUM);
+            Muls(tmp3, ocZ, rays.oz.GetValue(i), SPHERE_NUM);
+
+            Add(b,tmp1,tmp2,SPHERE_NUM);
+            Add(b,b,tmp3,SPHERE_NUM);
+
+            Mul(tmp1,ocX,ocX,SPHERE_NUM);
+            Mul(tmp2,ocY,ocY,SPHERE_NUM);
+            Mul(tmp3,ocZ,ocZ,SPHERE_NUM);
+
+            Add(c,tmp1,tmp2,SPHERE_NUM);
+            Add(c,c,tmp3,SPHERE_NUM);
+
+            // disc = b^2 - c
+            Mul(tmp1,b,b,SPHERE_NUM);
+            Sub(tmp2,tmp1,c,SPHERE_NUM);
+
+            // if disc < 0, no intersection
+            CompareScalar(mask1,tmp1,Float(0),CMPMODE::GT,SPHERE_NUM);
+        }
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
@@ -149,7 +186,7 @@ class KernelRender {
         int32_t c_y = TILING_LENGTH * 1;
         int32_t c_z = TILING_LENGTH * 2;
 
-        DataCopy(resultColor.x[progress * TILING_LENGTH], color[c_x], TILING_LENGTH); 
+        DataCopy(resultColor.x[progress * TILING_LENGTH], color[c_x], TILING_LENGTH);
         DataCopy(resultColor.y[progress * TILING_LENGTH], color[c_y], TILING_LENGTH);
         DataCopy(resultColor.z[progress * TILING_LENGTH], color[c_z], TILING_LENGTH);
 
@@ -167,28 +204,31 @@ class KernelRender {
     VecSoA resultColor;
 
     // Local
+    LocalTensor<Float> sphereData;
 
-    AscendC::TBuf<QuePosition::VECCALC> sphereBuf;
+    AscendC::TBuf<QuePosition::VECIN> sphereBuf;
+    AscendC::TBuf<QuePosition::VECCALC> tmpBuf;
+    AscendC::TBuf<QuePosition::VECCALC> maskBuf;
 
-    // 输入队列
+    // matmul::Matmul<aType,bType,biasType,cType> mm;
     TQue<QuePosition::VECIN, BUFFER_NUM> rayQueue;
-    // 输出队列
     TQue<QuePosition::VECOUT, BUFFER_NUM> colorQueue;
-
-    TQue<QuePosition::VECIN, BUFFER_NUM> sphereQueue;
+    TQue<QuePosition::VECIN, 1> sphereQueue;
 
     TPipe pipe;
 };
 
-extern "C" __global__ __aicore__ void render(GM_ADDR rays,GM_ADDR spheres, GM_ADDR colors) {
+extern "C" __global__ __aicore__ void render(GM_ADDR rays, GM_ADDR spheres, GM_ADDR colors) {
     KernelRender op;
 
-    op.Init(WIDTH, HEIGHT, SAMPLES, rays,spheres, colors);
+    op.Init(WIDTH, HEIGHT, SAMPLES, rays, spheres, colors);
     op.Process();
     op.Release();
 }
 
 #ifndef __CCE_KT_TEST__
 // call of kernel function
-void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays,uint8_t *spheres, uint8_t *colors) { render<<<blockDim, l2ctrl, stream>>>(rays,spheres, colors); }
+void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uint8_t *spheres, uint8_t *colors) {
+    render<<<blockDim, l2ctrl, stream>>>(rays, spheres, colors);
+}
 #endif
