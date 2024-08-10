@@ -40,7 +40,7 @@ class KernelRender {
         pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
         pipe.InitBuffer(tmpBuf, SPHERE_NUM * sizeof(Float) * 8);
-        pipe.InitBuffer(maskBuf, SPHERE_NUM * sizeof(uint8_t) * 1);
+        pipe.InitBuffer(maskBuf, SPHERE_NUM * sizeof(uint8_t) * 1 / 8);
 
         // REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(), mm); // 初始化
     }
@@ -170,7 +170,11 @@ class KernelRender {
             Sub(tmp2,tmp1,c,SPHERE_NUM);
 
             // if disc < 0, no intersection
-            CompareScalar(mask1,tmp1,Float(0),CMPMODE::GT,SPHERE_NUM);
+            
+            // tmp2.GetSize();
+            printf("tmp2 size: %d\n",tmp2.GetSize()); // 4 * 8 = 32
+            CompareScalar(mask1,tmp2,Float(0),CMPMODE::GT,256); // 256字节对齐
+            // Adds(tmp2,tmp2,Float(1),SPHERE_NUM);
         }
 
         rayQueue.FreeTensor(ray);

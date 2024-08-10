@@ -15,7 +15,7 @@ NPU版本的算子无法支持常见系统库函数，CCE编译器缺少对应�
   - npu
 - SOC_VERSION
   - Ascend310P1
-  - Ascend310P4 (Atlas 200 I DK)
+  - Ascend310B4 (Atlas 200 I DK)
 
 ```bash
   bash run.sh -r [RUN_MODE] -v  [SOC_VERSION] 
