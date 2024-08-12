@@ -23,6 +23,8 @@ def decode_color(w, h, s):
 
     # 读取color.bin文件 数据的格式为SoA的XYZ，转化为XYZ的Array
     colors = np.fromfile("./output/color.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
+    # print(colors.shape)
+    # print(colors)
     colors = colors.transpose(1, 2,3,0)
     
     # colors = colors[:, :, :,:3] # remove alpha channel

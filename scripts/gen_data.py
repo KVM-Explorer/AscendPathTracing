@@ -42,7 +42,7 @@ def gen_rays(w, h, s):
 
     # ===SOA===
     # ray xyz dx dy dz
-    rays = np.array(rays).reshape(-1, 6)
+    rays = np.array(rays).reshape(-1, 8)
     # print(rays.shape)
     rays = rays.T
 
@@ -62,9 +62,11 @@ Sphere spheres[] = {//Scene: radius, position, emission, color, material
    Sphere(600, Vec(50,681.6-.27,81.6),Vec(12,12,12),  Vec(), DIFF) //Lite 
  }; 
 '''
+
+
 def gen_spheres():
-    spheres = np.array([])
-    spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.75, 0.25, 0.25])  
+    spheres = np.array([]) # 8 spheres
+    spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.75, 0.25, 0.25])  # radius, x, y, z, emission xyz, color xyz
     spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.25, 0.25, 0.75])
     spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.75, 0.75, 0.75])
     spheres = np.append(spheres, [1e5, 50, 40.8, -1e5+170,   0,0, 0,   0, 0, 0])
@@ -75,13 +77,16 @@ def gen_spheres():
     spheres = np.append(spheres, [600, 50, 681.6-0.27, 81.6,   12, 12, 12,   0, 0, 0])
 
     # change spheres r -> r^2
-    num = spheres.shape[0]
-    spheres[0::num] = np.power(spheres[0::num], 2)
-
-
-    spheres = spheres.reshape(-1, num)
-    spheres = spheres.T
+    print(spheres.shape)
+    spheres = spheres.reshape(-1, 10)
     # print(spheres.shape)
+    # print("spheres before", spheres)
+    spheres[:, 0] = np.square(spheres[:, 0])
+    # print("spheres after", spheres)
+
+
+    spheres = spheres.T
+    print(spheres.shape)
     # print(spheres)
     spheres.astype(np.float32).tofile("./input/spheres.bin")
 
