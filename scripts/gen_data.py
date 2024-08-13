@@ -6,13 +6,18 @@ import numpy as np
 width = 16
 height = 16
 samples = 1
+eps = 1e-4
 
 def gen_rays(w, h, s):
 
     rays = []
-    camera = np.array([50, 52, 295.6]), np.array([0, -0.042612, -1]) / np.linalg.norm([0, -0.042612, -1])
+    camera_pos = np.array([50, 52, 295.6])
+    camera_dir = np.array([0, -0.042612, -1]) / np.linalg.norm([0, -0.042612, -1])
+    camera = np.array([camera_pos, camera_dir])
+
     cx = np.array([w * 0.5135 / h, 0, 0])
-    cy = np.cross(cx, camera[1]).reshape(3) * 0.5135 / np.linalg.norm(np.cross(cx, camera[1]))
+    cy = np.cross(cx, camera[1]) / np.linalg.norm(np.cross(cx, camera[1])) * 0.5135
+    print("camera: ", camera.shape)
 
     for i in range(w):
         for j in range(h):
@@ -23,10 +28,15 @@ def gen_rays(w, h, s):
                         dx = np.sqrt(r1) - 1 if r1 < 1 else 1 - np.sqrt(2 - r1)
                         r2 = 2 * np.random.rand()
                         dy = np.sqrt(r2) - 1 if r2 < 1 else 1 - np.sqrt(2 - r2)
-                        d = cx * ((sx + 0.5 + dx) / 2 + i) / w - 0.5 + \
-                            cy * ((sy + 0.5 + dy) / 2 + j) / h - 0.5 + \
+                        d = cx * (((sx + 0.5 + dx) / 2 + i) / w - 0.5) + \
+                            cy * (((sy + 0.5 + dy) / 2 + j) / h - 0.5) + \
                             camera[1]
-                        rays.append(np.array([camera[0], (d / np.linalg.norm(d)) * 140]))
+                        
+                        ray_pos = camera[0] + d * 140
+                        ray_dir = d / np.linalg.norm(d)
+                        rays.append(np.concatenate([ray_pos, ray_dir]))
+                        # if i < 10 and j < 10:
+                        #     print("ray", rays[-1],"| d ",d)
     
     #===AoS===
     # rays = np.array(rays).reshape(-1, 3)
@@ -42,12 +52,17 @@ def gen_rays(w, h, s):
 
     # ===SOA===
     # ray xyz dx dy dz
-    rays = np.array(rays).reshape(-1, 8)
+    rays = np.array(rays).reshape(-1, 6)
+    # for i in range(5):
+    #     print("1.rays: ",rays[i])
     # print(rays.shape)
     rays = rays.T
 
     rays.astype(np.float32).tofile("./input/rays.bin")
     # print(rays.shape)
+    rays = rays.T
+    rays = rays.reshape(-1, 2, 3)
+    return rays
 
 '''
 Sphere spheres[] = {//Scene: radius, position, emission, color, material 
@@ -77,7 +92,7 @@ def gen_spheres():
     spheres = np.append(spheres, [600, 50, 681.6-0.27, 81.6,   12, 12, 12,   0, 0, 0])
 
     # change spheres r -> r^2
-    print(spheres.shape)
+    # print("sphere gen shape",spheres.shape)
     spheres = spheres.reshape(-1, 10)
     # print(spheres.shape)
     # print("spheres before", spheres)
@@ -86,11 +101,68 @@ def gen_spheres():
 
 
     spheres = spheres.T
-    print(spheres.shape)
+    # print("sphere shape:",spheres.shape)
     # print(spheres)
     spheres.astype(np.float32).tofile("./input/spheres.bin")
+    return spheres.T
+
+def test_scene(rays, spheres):
+    print("test scene ray shape",rays.shape)
+    print("test scene sphere shape: ",spheres.shape)
+
+    ret = np.zeros((rays.shape[0], 3), dtype=np.float32)
+    print("ret", ret.shape) 
+
+
+    # for i in range(3):
+    #     print("sphere content:",np.round(spheres[i],2))
+
+    for i,ray in enumerate(rays):
+        min_distance = 1e20  
+        sphere_id = -1
+        for k,sphere in enumerate(spheres):
+            # print(ray, sphere)
+            op = sphere[1:4] - ray[0] # L = O - C
+            b = np.dot(op, ray[1]) # b = L * D
+            det = b * b - np.dot(op, op) + sphere[0] # det = b^2 - L^2 + r^2
+            if det < 0:
+                continue
+            det = np.sqrt(det)
+            t0 = b - det
+            t1 = b + det
+            #print("t0: ", t0, "t1: ", t1)
+
+            if t0 > eps and t0 < min_distance:
+                min_distance = t0
+                sphere_id = k
+            elif t1 > eps and t1 < min_distance:
+                min_distance = t1
+                sphere_id = k
+            else:
+                continue
+        
+        if sphere_id == -1:
+            ret[i] = np.array([0, 0, 0])
+        else:
+            if sphere_id == 7:
+                ret[i] = spheres[sphere_id, 4:7]
+                
+            else:
+                ret[i] = spheres[sphere_id, 7:10]
+        
+        if i % 100 == 0:
+            print("hit sphere: ", sphere_id," ,min_dis: ", min_distance)
+
+    ret = ret.T
+    #print("ret", ret.shape)
+    ret.astype(np.float32).tofile("./output/test_scene.bin")
+
+
 
     
 if __name__ == "__main__":
-    gen_rays(width, height, samples)
-    gen_spheres()
+    np.set_printoptions(formatter={'float_kind': lambda x: f"{x:.5f}"}, precision=2)
+
+    rays = gen_rays(width, height, samples)
+    spheres = gen_spheres()
+    # test_scene(rays, spheres)
