@@ -29,7 +29,7 @@ struct RayLocalSoA {
     AscendC::LocalTensor<Float> ox, oy, oz;
     AscendC::LocalTensor<Float> dx, dy, dz;
     __aicore__ inline RayLocalSoA() {}
-    inline void Init(AscendC::LocalTensor<Float> data, int offset) {
+    __aicore__ inline void Init(AscendC::LocalTensor<Float> data, int offset) {
         ox = data[offset * 0];
         oy = data[offset * 1];
         oz = data[offset * 2];
@@ -44,7 +44,7 @@ struct SphereLocalSoA {
     AscendC::LocalTensor<Float> emissionX, emissionY, emissionZ;
     AscendC::LocalTensor<Float> colorX, colorY, colorZ;
     __aicore__ inline SphereLocalSoA() {}
-    inline void Init(AscendC::LocalTensor<Float> data) {
+    __aicore__ inline void Init(AscendC::LocalTensor<Float> data) {
         r2 = data[SPHERE_NUM * 0];
         x = data[SPHERE_NUM * 1];
         y = data[SPHERE_NUM * 2];
@@ -70,13 +70,14 @@ struct VecSoA {
 struct VecLocalSoA {
     AscendC::LocalTensor<Float> x, y, z;
     __aicore__ inline VecLocalSoA() {}
-    inline void Init(AscendC::LocalTensor<Float> data, int offset) {
+    __aicore__ inline void Init(AscendC::LocalTensor<Float> data, int offset) {
         x = data[offset * 0];
         y = data[offset * 1];
         z = data[offset * 2];
     }
 };
 
+#ifdef __CCE_KT_TEST__
 template <typename T> inline void CPUDumpTensor(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
     printf("%s: \n\t", name);
     auto format_str = "%5.3f ";
@@ -89,6 +90,7 @@ template <typename T> inline void CPUDumpTensor(const char *name, const AscendC:
     }
     printf("\n");
 }
+#endif
 
 // inline void CPUDumpTensor(const char *name, const AscendC::LocalTensor<Float> &tensor, int count) {
 //     printf("%s: \n\t", name);
@@ -140,59 +142,59 @@ __aicore__ inline void InitColorSoA(VecSoA &color, GM_ADDR output, int block_off
  * @param rays 光线信息
  * @param count 光线数量
  */
-__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator *allocator, Sphere &sphere, RayLocalSoA &rays, int count) {
+__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator &allocator, Sphere &sphere, RayLocalSoA &rays, int count) {
     using AscendC::LocalTensor;
     using namespace AscendC;
 
-    auto ocX = allocator->Alloc(count);
-    auto ocY = allocator->Alloc(count);
-    auto ocZ = allocator->Alloc(count);
+    auto ocX =  AllocDecorator( allocator.Alloc(count));
+    auto ocY = AllocDecorator( allocator.Alloc(count));
+    auto ocZ = AllocDecorator( allocator.Alloc(count));
 
-    Adds(ocX.buffer, rays.ox, -sphere.x, count); // ocX = spheres.x - rays.ox
-    Muls(ocX.buffer, ocX.buffer, Float(-1), count);
-    Adds(ocY.buffer, rays.oy, -sphere.y, count); // ocY = spheres.y - rays.oy
-    Muls(ocY.buffer, ocY.buffer, Float(-1), count);
-    Adds(ocZ.buffer, rays.oz, -sphere.z, count); // ocZ = spheres.z - rays.oz
-    Muls(ocZ.buffer, ocZ.buffer, Float(-1), count);
+    Adds(ocX.Get(), rays.ox, -sphere.x, count); // ocX = spheres.x - rays.ox
+    Muls(ocX.Get(), ocX.Get(), Float(-1), count);
+    Adds(ocY.Get(), rays.oy, -sphere.y, count); // ocY = spheres.y - rays.oy
+    Muls(ocY.Get(), ocY.Get(), Float(-1), count);
+    Adds(ocZ.Get(), rays.oz, -sphere.z, count); // ocZ = spheres.z - rays.oz
+    Muls(ocZ.Get(), ocZ.Get(), Float(-1), count);
 
     // b = ocX * rays.ox + ocY * rays.oy + ocZ * rays.oz
-    auto b = allocator->Alloc(count);
-    Duplicate(b.buffer, Float(0), count);            // b = 0
-    MulAddDst(b.buffer, ocX.buffer, rays.dx, count); // b += ocX * rays.ox
-    MulAddDst(b.buffer, ocY.buffer, rays.dy, count); // b += ocY * rays.oy
-    MulAddDst(b.buffer, ocZ.buffer, rays.dz, count); // b += ocZ * rays.oz
+    auto b = AllocDecorator( allocator.Alloc(count));
+    Duplicate(b.Get(), Float(0), count);            // b = 0
+    MulAddDst(b.Get(), ocX.Get(), rays.dx, count); // b += ocX * rays.ox
+    MulAddDst(b.Get(), ocY.Get(), rays.dy, count); // b += ocY * rays.oy
+    MulAddDst(b.Get(), ocZ.Get(), rays.dz, count); // b += ocZ * rays.oz
 
     // c =  ocX * ocX + ocY * ocY + ocZ * ocZ - sphere.r2
-    auto c = allocator->Alloc(count);
-    Duplicate(c.buffer, Float(0), count);
-    MulAddDst(c.buffer, ocX.buffer, ocX.buffer, count); // c += ocX * ocX
-    MulAddDst(c.buffer, ocY.buffer, ocY.buffer, count); // c += ocY * ocY
-    MulAddDst(c.buffer, ocZ.buffer, ocZ.buffer, count); // c += ocZ * ocZ
-    Adds(c.buffer, c.buffer, -sphere.r2, count);        // c = dot(oc, oc) - sphere.r2
+    auto c = AllocDecorator( allocator.Alloc(count));
+    Duplicate(c.Get(), Float(0), count);
+    MulAddDst(c.Get(), ocX.Get(), ocX.Get(), count); // c += ocX * ocX
+    MulAddDst(c.Get(), ocY.Get(), ocY.Get(), count); // c += ocY * ocY
+    MulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), count); // c += ocZ * ocZ
+    Adds(c.Get(), c.Get(), -sphere.r2, count);        // c = dot(oc, oc) - sphere.r2
 
     // disc = b^2 - c
-    auto disc = allocator->Alloc(count);
-    Mul(disc.buffer, b.buffer, b.buffer, count);    // disc = b * b
-    Sub(disc.buffer, disc.buffer, c.buffer, count); // disc = disc - c
+    auto disc = AllocDecorator( allocator.Alloc(count));
+    Mul(disc.Get(), b.Get(), b.Get(), count);    // disc = b * b
+    Sub(disc.Get(), disc.Get(), c.Get(), count); // disc = disc - c
 
-    auto discrSq = allocator->Alloc(count);
-    Sqrt(discrSq.buffer, disc.buffer, count); // tmp2 = sqrt(tmp1) | 对于负数sqrt会返回nan
+    auto discrSq = AllocDecorator( allocator.Alloc(count));
+    Sqrt(discrSq.Get(), disc.Get(), count); // tmp2 = sqrt(tmp1) | 对于负数sqrt会返回nan
 
-    auto t0 = allocator->Alloc(count);
-    auto t1 = allocator->Alloc(count);
+    auto t0 = AllocDecorator( allocator.Alloc(count));
+    auto t1 = AllocDecorator( allocator.Alloc(count));
 
-    Sub(t0.buffer, b.buffer, discrSq.buffer, count); // t0 = b - discrSq | nan
-    Add(t1.buffer, b.buffer, discrSq.buffer, count); // t1 = b + discrSq | nan
+    Sub(t0.Get(), b.Get(), discrSq.Get(), count); // t0 = b - discrSq | nan
+    Add(t1.Get(), b.Get(), discrSq.Get(), count); // t1 = b + discrSq | nan
 
-    auto t_mask = allocator->Alloc(count);
-    CompareScalar(t_mask.buffer, t0.buffer, Float(0), CMPMODE::GT, count);                                                // mask2 = t0 > 0
-    Select(dst, t_mask.buffer.ReinterpretCast<uint8_t>(), t0.buffer, t1.buffer, SELMODE::VSEL_TENSOR_TENSOR_MODE, count); // t = mask2 ? t0 : t1
+    auto t_mask = AllocDecorator( allocator.Alloc(count));
+    CompareScalar(t_mask.Get(), t0.Get(), Float(0), CMPMODE::GT, count);                                                // mask2 = t0 > 0
+    Select(dst, t_mask.Get().ReinterpretCast<uint8_t>(), t0.Get(), t1.Get(), SELMODE::VSEL_TENSOR_TENSOR_MODE, count); // t = mask2 ? t0 : t1
 
     // set number less than 0 | nan to INF
-    auto select_mask = allocator->Alloc(count);
-    CompareScalar(select_mask.buffer, dst, Float(0), CMPMODE::GT, count);
+    auto select_mask = AllocDecorator( allocator.Alloc(count));
+    CompareScalar(select_mask.Get(), dst, Float(0), CMPMODE::GT, count);
 
     // if (get_block_idx() == 0)
     //     printf("DEBUG:: select_mask %d\n", select_mask.GetId());
-    Select(dst, select_mask.buffer.ReinterpretCast<uint8_t>(), dst, Float(1e20), SELMODE::VSEL_TENSOR_SCALAR_MODE, count); // t = mask3 ? t : INF
+    Select(dst, select_mask.Get().ReinterpretCast<uint8_t>(), dst, Float(1e20), SELMODE::VSEL_TENSOR_SCALAR_MODE, count); // t = mask3 ? t : INF
 }

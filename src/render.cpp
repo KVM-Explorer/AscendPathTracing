@@ -57,7 +57,7 @@ class KernelRender {
     }
 
     __aicore__ inline void Release() {
-        allocator = nullptr;
+        
         // free local tensor
     }
 
@@ -70,7 +70,7 @@ class KernelRender {
 
     __aicore__ inline void InitAllocator() {
         LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
-        allocator = std::make_unique<Allocator>(tmpBuffer, TILING_LENGTH * (SPHERE_NUM + 20));
+        allocator.Init(tmpBuffer, TILING_LENGTH * (SPHERE_NUM + 20));
     }
 
     // upload sphere data to device memory
@@ -111,7 +111,7 @@ class KernelRender {
         // VecLocalSoA ret;
         // ret.Init(tmpBuffer[tmp_addr], TILING_LENGTH);
 
-        auto stage1val = allocator->Alloc(TILING_LENGTH * SPHERE_NUM);
+        auto stage1val = AllocDecorator( allocator.Alloc(TILING_LENGTH * SPHERE_NUM));
 
         RayLocalSoA rays;
         rays.Init(ray, TILING_LENGTH);
@@ -132,21 +132,21 @@ class KernelRender {
                 .y = spheres.y.GetValue(i),
                 .z = spheres.z.GetValue(i)};
             // clang-format on
-            auto dst = stage1val.buffer[offset];
-            SphereHitInfo(dst, allocator.get(), cur_sphere, rays, TILING_LENGTH);
+            auto dst = stage1val.Get()[offset];
+            SphereHitInfo(dst, allocator, cur_sphere, rays, TILING_LENGTH);
         }
 
         // Step2: compute color | Force Format to 256Bytes RayGroup
         uint64_t uint64Mask = (1ULL << 63);
         for (int i = 0; i < TILING_LENGTH; i++) {
             const uint64_t ray_mask[] = {(uint64Mask >> i), 0};
-            auto minResult = allocator->Alloc(TILING_LENGTH);
-            auto workspace = allocator->Alloc(TILING_LENGTH * 8); // FIXME: 计算精准计算最小值需要的临时空间
+            auto minResult = AllocDecorator(allocator.Alloc(TILING_LENGTH));
+            auto workspace = AllocDecorator(allocator.Alloc(TILING_LENGTH * 8)); // FIXME: 计算精准计算最小值需要的临时空间
 
-            ReduceMin<Float>(minResult.buffer, stage1val.buffer, workspace.buffer, ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
-            auto val = minResult.buffer.GetValue(0);
+            ReduceMin<Float>(minResult.Get(), stage1val.Get(), workspace.Get(), ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
+            auto val = minResult.Get().GetValue(0);
 
-            auto index = minResult.buffer.ReinterpretCast<uint32_t>().GetValue(1);
+            auto index = minResult.Get().ReinterpretCast<uint32_t>().GetValue(1);
             index = index / TILING_LENGTH;
 
             // hit sphere
@@ -201,7 +201,7 @@ class KernelRender {
     int samples;
 
     // tmp memory allocator
-    std::unique_ptr<Allocator> allocator;
+    Allocator allocator;
 
     // global
     RaySoA inputRays;
