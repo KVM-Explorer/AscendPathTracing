@@ -9,3 +9,5 @@ const float PI = 3.1415926535897932385f;
 // constexpr Float EPSILON = 1e-4;
 const int32_t SPHERE_NUM = 8;
 const int32_t SPHERE_MEMBER_NUM = 10;
+using Float = float;
+

@@ -1,3 +1,4 @@
+#include "allocator.h"
 #include "rt_helper.h"
 #include <cstdint>
 using namespace AscendC;
@@ -33,20 +34,21 @@ class KernelRender {
 
         pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
-        pipe.InitBuffer(tmpBuf, TILING_LENGTH * sizeof(Float) * (3 + SPHERE_NUM + 8));
-        pipe.InitBuffer(maskBuf, 128);
+        pipe.InitBuffer(tmpBuf, TILING_LENGTH * sizeof(Float) * (3 + SPHERE_NUM + 8 + 20));
         pipe.InitBuffer(tmpIndexBuf, SPHERE_NUM * sizeof(uint32_t));
-
-        // REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(), mm); // 初始化
     }
 
     __aicore__ inline void Process() {
-        DataFormatCheck();
+        // if (GetBlockIdx() == 0) {
+        //     printf("core %ld\n", GetBlockIdx());
+        //     auto ch = getchar();
+        // }
 
+        DataFormatCheck();
+        InitAllocator();
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
 
         UploadSpheres();
-        GenerateIndices();
         for (int i = 0; i < loop_count; i++) {
             CopyIn(i);
             Compute(i);
@@ -55,6 +57,7 @@ class KernelRender {
     }
 
     __aicore__ inline void Release() {
+        allocator = nullptr;
         // free local tensor
     }
 
@@ -65,19 +68,15 @@ class KernelRender {
         ASSERT(TILING_LENGTH == 64);            // ,"Tiling length must be 64"
     }
 
+    __aicore__ inline void InitAllocator() {
+        LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
+        allocator = std::make_unique<Allocator>(tmpBuffer, TILING_LENGTH * (SPHERE_NUM + 20));
+    }
+
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
         sphereData = sphereBuf.Get<Float>();
         DataCopy(sphereData, inputSpheres, SPHERE_NUM * 10);
-    }
-
-    __aicore__ inline void GenerateIndices() {
-        indexData = tmpIndexBuf.Get<uint32_t>();
-        uint32_t cur = 0;
-        for (int i = 0; i < SPHERE_NUM; i++) {
-            indexData.SetValue(i, cur);
-            cur += TILING_LENGTH;
-        }
     }
 
     // system mem -> device memory
@@ -104,28 +103,16 @@ class KernelRender {
 
     // read device memory & compute & output to device queue & all samples
     __aicore__ inline void Compute(int32_t progress) {
+        // printf("compute %d\n", progress);
 
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
 
-        LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
+        // VecLocalSoA ret;
+        // ret.Init(tmpBuffer[tmp_addr], TILING_LENGTH);
 
-        int32_t tmp_addr = 0;
-        VecLocalSoA ret;
-        ret.Init(tmpBuffer[tmp_addr], TILING_LENGTH);
-        tmp_addr += TILING_LENGTH * 3; // ray count * 3
-        LocalTensor<Float> stage1val = tmpBuffer[tmp_addr];
-        tmp_addr += TILING_LENGTH * SPHERE_NUM; // ray count * SPHERE_NUM
+        auto stage1val = allocator->Alloc(TILING_LENGTH * SPHERE_NUM);
 
-        LocalTensor<Float> sharedTmpBuffer = tmpBuffer[tmp_addr]; // ray count  * 8
-
-        LocalTensor<uint8_t> maskeBase = maskBuf.Get<uint8_t>();
-        LocalTensor<uint8_t> retMask = maskeBase[0]; // addr: 0  half128bit，float64bit-> 8Bytes
-        LocalTensor<uint8_t> mask2 = maskeBase[32];  // addr: TILE_LENGTH/8 -> 8Bytes FIXME: 不满足32Bytes对齐
-        LocalTensor<uint8_t> mask3 = maskeBase[64];
-        LocalTensor<uint8_t> stage1mask = maskeBase[96];
-
-        // count
         RayLocalSoA rays;
         rays.Init(ray, TILING_LENGTH);
 
@@ -145,60 +132,29 @@ class KernelRender {
                 .y = spheres.y.GetValue(i),
                 .z = spheres.z.GetValue(i)};
             // clang-format on
-            auto dst = stage1val[offset];
-            SphereHitInfo(dst, sharedTmpBuffer, cur_sphere, rays, TILING_LENGTH);
+            auto dst = stage1val.buffer[offset];
+            SphereHitInfo(dst, allocator.get(), cur_sphere, rays, TILING_LENGTH);
         }
-
-        // if (get_block_idx() == 0) {
-        //     for (int i = 0; i < SPHERE_NUM; i++) {
-        //         printf("Core: %ld sphere:%d\n", GetBlockIdx(), i);
-        //         for (int j = 0; j < TILING_LENGTH; j++) {
-        //             printf("%5.2f, ", stage1val.GetValue(i * TILING_LENGTH + j));
-        //         }
-        //         printf("\n============\n");
-        //     }
-        // }
-
-        // Reset val(<0) to INF
-        // CompareScalar(stage1val,stage1val,Float(0),CMPMODE::GT,count*SPHERE_NUM); // mask = t > 0
-        // Select(stage1val,mask1,stage1val,Float(1e20),SELMODE::VSEL_CMPMASK_SPR,SPHERE_NUM*count); // t = mask1 ? t : INF
-        // for(int i=0;i<SPHERE_NUM;i++){
-        //     printf("Core: %ld sphere:%d\n",GetBlockIdx(),i);
-        //     for(int j=0;j<count;j++){
-        //         printf("%5.2f, ",stage1val.GetValue(i*count+j));
-        //     }
-        //     printf("============\n");
-        // }
 
         // Step2: compute color | Force Format to 256Bytes RayGroup
         uint64_t uint64Mask = (1ULL << 63);
         for (int i = 0; i < TILING_LENGTH; i++) {
             const uint64_t ray_mask[] = {(uint64Mask >> i), 0};
-            LocalTensor<Float> tmp1 = tmpBuffer[tmp_addr];
-            LocalTensor<Float> tmp2 = tmpBuffer[tmp_addr + TILING_LENGTH];
-            // worklocal space:
+            auto minResult = allocator->Alloc(TILING_LENGTH);
+            auto workspace = allocator->Alloc(TILING_LENGTH * 8); // FIXME: 计算精准计算最小值需要的临时空间
 
-            ReduceMin<Float>(tmp1, stage1val, tmp2, ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
-            auto val = tmp1.GetValue(0);
+            ReduceMin<Float>(minResult.buffer, stage1val.buffer, workspace.buffer, ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
+            auto val = minResult.buffer.GetValue(0);
 
-            auto index = tmp1.ReinterpretCast<uint32_t>().GetValue(1);
+            auto index = minResult.buffer.ReinterpretCast<uint32_t>().GetValue(1);
             index = index / TILING_LENGTH;
-
-            // if (GetBlockIdx() == 0) {
-            //     printf("id:%d, val:%f, index:%d\n", i, val, index);
-            // }
 
             // hit sphere
             if (val > 0) {
 
-                colors.x.SetValue(i,spheres.colorX.GetValue(index));
-                colors.y.SetValue(i,spheres.colorY.GetValue(index));
-                colors.z.SetValue(i,spheres.colorZ.GetValue(index));
-
-                // color 0.1 0.5 0.7
-                // colors.x.SetValue(i, Float(0.0));
-                // colors.y.SetValue(i, Float(1.0));
-                // colors.z.SetValue(i, Float(0.0));
+                colors.x.SetValue(i, spheres.colorX.GetValue(index));
+                colors.y.SetValue(i, spheres.colorY.GetValue(index));
+                colors.z.SetValue(i, spheres.colorZ.GetValue(index));
             } else {
 
                 Float cx, cy, cz;
@@ -244,6 +200,9 @@ class KernelRender {
     int height;
     int samples;
 
+    // tmp memory allocator
+    std::unique_ptr<Allocator> allocator;
+
     // global
     RaySoA inputRays;
     GlobalTensor<Float> inputSpheres;
@@ -251,12 +210,10 @@ class KernelRender {
 
     // Local
     LocalTensor<Float> sphereData;
-    LocalTensor<uint32_t> indexData;
 
     AscendC::TBuf<QuePosition::VECIN> sphereBuf;
     AscendC::TBuf<QuePosition::VECCALC> tmpBuf;
     AscendC::TBuf<QuePosition::VECCALC> tmpIndexBuf;
-    AscendC::TBuf<QuePosition::VECCALC> maskBuf;
 
     // matmul::Matmul<aType,bType,biasType,cType> mm;
     TQue<QuePosition::VECIN, BUFFER_NUM> rayQueue;

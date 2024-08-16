@@ -1,9 +1,24 @@
 #pragma once
+#include "allocator.h"
 #include "common.h"
 #include "kernel_operator.h"
 
-using Float = float;
 
+/*
+    * @brief 获取规约操作的临时缓冲区长度
+    * @param data_num 数据数量个数
+    * @param index 是否需要索引
+    * @return 临时缓冲区长度
+    * @note UnifiedBuffer 满足datablock 32B对齐，同时无论是否需要索引，都需要分配内存
+                          单次规约操作的最大字节数是256B, 8个datablock，生成一个val和index
+                          不需要index的情况下，处理一次操作的数据并对齐到32B
+                          否则在需要index可能存在递归规约的情况，此时需要保留全部的内存，并且每轮规约的数据需要对齐到32B
+
+*/
+template <typename T> inline std::uint32_t GetWorkspaceLength(int data_num, bool index = false) {
+    // TODO:
+    return -1;
+}
 struct RaySoA {
     AscendC::GlobalTensor<Float> ox, oy, oz;
     AscendC::GlobalTensor<Float> dx, dy, dz;
@@ -125,65 +140,59 @@ __aicore__ inline void InitColorSoA(VecSoA &color, GM_ADDR output, int block_off
  * @param rays 光线信息
  * @param count 光线数量
  */
-__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &sharedTmpBuffer, Sphere &sphere,
-                                     RayLocalSoA &rays, int count) {
+__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator *allocator, Sphere &sphere, RayLocalSoA &rays, int count) {
     using AscendC::LocalTensor;
     using namespace AscendC;
-    LocalTensor<Float> ocX = sharedTmpBuffer[count * 0], ocY = sharedTmpBuffer[count * 1], ocZ = sharedTmpBuffer[count * 2];
-    LocalTensor<Float> b = sharedTmpBuffer[count * 3], c = sharedTmpBuffer[count * 4];
-    LocalTensor<Float> t0 = sharedTmpBuffer[count * 5], t1 = sharedTmpBuffer[count * 6];
-    LocalTensor<uint8_t> disc_bitmask = sharedTmpBuffer[count * 7].ReinterpretCast<uint8_t>();
 
-    Adds(ocX, rays.ox, -sphere.x, count); // ocX = spheres.x - rays.ox
-    Muls(ocX, ocX, Float(-1), count);
-    Adds(ocY, rays.oy, -sphere.y, count); // ocY = spheres.y - rays.oy
-    Muls(ocY, ocY, Float(-1), count);
-    Adds(ocZ, rays.oz, -sphere.z, count); // ocZ = spheres.z - rays.oz
-    Muls(ocZ, ocZ, Float(-1), count);
+    auto ocX = allocator->Alloc(count);
+    auto ocY = allocator->Alloc(count);
+    auto ocZ = allocator->Alloc(count);
+
+    Adds(ocX.buffer, rays.ox, -sphere.x, count); // ocX = spheres.x - rays.ox
+    Muls(ocX.buffer, ocX.buffer, Float(-1), count);
+    Adds(ocY.buffer, rays.oy, -sphere.y, count); // ocY = spheres.y - rays.oy
+    Muls(ocY.buffer, ocY.buffer, Float(-1), count);
+    Adds(ocZ.buffer, rays.oz, -sphere.z, count); // ocZ = spheres.z - rays.oz
+    Muls(ocZ.buffer, ocZ.buffer, Float(-1), count);
 
     // b = ocX * rays.ox + ocY * rays.oy + ocZ * rays.oz
-    Duplicate(b, Float(0), count);     // b = 0
-    MulAddDst(b, ocX, rays.dx, count); // b += ocX * rays.ox
-    MulAddDst(b, ocY, rays.dy, count); // b += ocY * rays.oy
-    MulAddDst(b, ocZ, rays.dz, count); // b += ocZ * rays.oz
+    auto b = allocator->Alloc(count);
+    Duplicate(b.buffer, Float(0), count);            // b = 0
+    MulAddDst(b.buffer, ocX.buffer, rays.dx, count); // b += ocX * rays.ox
+    MulAddDst(b.buffer, ocY.buffer, rays.dy, count); // b += ocY * rays.oy
+    MulAddDst(b.buffer, ocZ.buffer, rays.dz, count); // b += ocZ * rays.oz
 
     // c =  ocX * ocX + ocY * ocY + ocZ * ocZ - sphere.r2
-    Duplicate(c, Float(0), count);
-    MulAddDst(c, ocX, ocX, count); // c += ocX * ocX
-    MulAddDst(c, ocY, ocY, count); // c += ocY * ocY
-    MulAddDst(c, ocZ, ocZ, count); // c += ocZ * ocZ
-    Adds(c, c, -sphere.r2, count); // c = dot(oc, oc) - sphere.r2
+    auto c = allocator->Alloc(count);
+    Duplicate(c.buffer, Float(0), count);
+    MulAddDst(c.buffer, ocX.buffer, ocX.buffer, count); // c += ocX * ocX
+    MulAddDst(c.buffer, ocY.buffer, ocY.buffer, count); // c += ocY * ocY
+    MulAddDst(c.buffer, ocZ.buffer, ocZ.buffer, count); // c += ocZ * ocZ
+    Adds(c.buffer, c.buffer, -sphere.r2, count);        // c = dot(oc, oc) - sphere.r2
 
-    auto &disc = ocX;
     // disc = b^2 - c
-    Mul(disc, b, b, count);    // disc = b * b
-    Sub(disc, disc, c, count); // disc = disc - c
+    auto disc = allocator->Alloc(count);
+    Mul(disc.buffer, b.buffer, b.buffer, count);    // disc = b * b
+    Sub(disc.buffer, disc.buffer, c.buffer, count); // disc = disc - c
 
-    // CompareScalar(disc_bitmask, disc, Float(0), CMPMODE::GT, count); // 存在交点
-    // uint64_t bitmask = disc_bitmask.ReinterpretCast<uint64_t>().GetValue(0);
+    auto discrSq = allocator->Alloc(count);
+    Sqrt(discrSq.buffer, disc.buffer, count); // tmp2 = sqrt(tmp1) | 对于负数sqrt会返回nan
 
-    // static int idx = 0;
-    // if (GetBlockIdx() == 0 && idx == 0) {
-    //     // CPUDumpTensor("dst", dst, count);
-    //     CPUDumpTensor("bitmask", disc_bitmask, count / 8, true);
-    //     idx++;
-    // }
+    auto t0 = allocator->Alloc(count);
+    auto t1 = allocator->Alloc(count);
 
-    auto &discrSq = ocY;
-    Sqrt(discrSq, disc, count); // tmp2 = sqrt(tmp1) | 对于负数sqrt会返回nan
+    Sub(t0.buffer, b.buffer, discrSq.buffer, count); // t0 = b - discrSq | nan
+    Add(t1.buffer, b.buffer, discrSq.buffer, count); // t1 = b + discrSq | nan
 
-    Sub(t0, b, discrSq, count); // t0 = b - discrSq | nan
-    Add(t1, b, discrSq, count); // t1 = b + discrSq | nan
-
-    auto &t_bitmask = ocZ;
-    CompareScalar(t_bitmask, t0, Float(0), CMPMODE::GT, count);                                         // mask2 = t0 > 0
-    Select(dst, t_bitmask.ReinterpretCast<uint8_t>(), t0, t1, SELMODE::VSEL_TENSOR_TENSOR_MODE, count); // t = mask2 ? t0 : t1
+    auto t_mask = allocator->Alloc(count);
+    CompareScalar(t_mask.buffer, t0.buffer, Float(0), CMPMODE::GT, count);                                                // mask2 = t0 > 0
+    Select(dst, t_mask.buffer.ReinterpretCast<uint8_t>(), t0.buffer, t1.buffer, SELMODE::VSEL_TENSOR_TENSOR_MODE, count); // t = mask2 ? t0 : t1
 
     // set number less than 0 | nan to INF
-    auto &select_bitmask = ocX;
-    CompareScalar(select_bitmask, dst, Float(0), CMPMODE::GT, count);
+    auto select_mask = allocator->Alloc(count);
+    CompareScalar(select_mask.buffer, dst, Float(0), CMPMODE::GT, count);
 
-    Select(dst, select_bitmask.ReinterpretCast<uint8_t>(), dst, Float(1e20), SELMODE::VSEL_TENSOR_SCALAR_MODE, count); // t = mask3 ? t : INF
-
-    
+    // if (get_block_idx() == 0)
+    //     printf("DEBUG:: select_mask %d\n", select_mask.GetId());
+    Select(dst, select_mask.buffer.ReinterpretCast<uint8_t>(), dst, Float(1e20), SELMODE::VSEL_TENSOR_SCALAR_MODE, count); // t = mask3 ? t : INF
 }

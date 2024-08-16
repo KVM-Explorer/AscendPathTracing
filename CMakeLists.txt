@@ -7,7 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS  ON)
 
 # Debug
 # set(smoke_testcase render)
-# set(ASCEND_PRODUCT_TYPE Ascend910A)
+# set(ASCEND_PRODUCT_TYPE Ascend310P1)
 # set(ASCEND_CORE_TYPE AiCore)    
 # set(ASCEND_RUN_MODE cpu)
 # set(ASCEND_INSTALL_PATH /usr/local/Ascend/ascend-toolkit/latest)
