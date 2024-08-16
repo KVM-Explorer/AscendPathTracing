@@ -7,11 +7,16 @@ struct MemoryResource {
     uint32_t id;
     uint32_t start;
     uint32_t end;
-    bool is_free;
+    bool is_free = true;
     //[start, end)]
-    __aicore__ inline MemoryResource(uint32_t id, uint32_t start, uint32_t end) : id(id), start(start), end(end), is_free(true) {}
+    __aicore__ inline MemoryResource() : id(0), start(0), end(0), is_free(true) {}
+    __aicore__ inline void Init(uint32_t id, uint32_t start, uint32_t end, bool is_free) {
+        this->id = id;
+        this->start = start;
+        this->end = end;
+        this->is_free = is_free;
+    }
     __aicore__ inline MemoryResource &operator=(const MemoryResource &other) { return *this; }
-
 
     bool operator==(const MemoryResource &other) const { return id == other.id; }
 };
@@ -20,7 +25,12 @@ struct LinkList {
     MemoryResource data;
     LinkList *next = nullptr;
     LinkList *prev = nullptr;
-    __aicore__ inline LinkList(uint32_t id, uint32_t start, uint32_t end) : data(id, start, end), next(nullptr) {}
+    __aicore__ inline LinkList() {}
+    __aicore__ inline void Init(uint32_t id, uint32_t start, uint32_t end,bool is_free=true) { 
+      data.Init(id, start, end, is_free); 
+      next = nullptr;
+      prev = nullptr;
+    }
 };
 
 class AllocRet;
@@ -42,15 +52,29 @@ class Allocator {
     __aicore__ void Free(uint32_t id);
 
   private:
-    uint32_t GetNewId() { return id++; }
-    uint32_t GetCurId() { return id - 1; }
+    __aicore__ uint32_t GetNewId() {
+        while(true)
+        {
+            if(Pool[id].data.is_free)
+            {
+                break;
+            }
+            id = (id + 1) % MAX_NUM;
+        }
+        uint32_t ret = id;
+        id = (id + 1) % MAX_NUM;
+        return ret;
+    }
 
     // insert node after cur
-    void InsertNode(LinkList *cur, LinkList *node);
-    void DeleteNode(LinkList *cur);
-    void MergeNode(LinkList *cur);
+    __aicore__ void InsertNode(LinkList *cur, LinkList *node);
+    __aicore__ void DeleteNode(LinkList *cur);
+    __aicore__ void MergeNode(LinkList *cur);
 
-    std::unique_ptr<LinkList> head;
+    LinkList* head;
+
+    static const uint32_t MAX_NUM{100};
+    LinkList Pool[MAX_NUM];
 
     uint32_t id = 0;
     AscendC::LocalTensor<Float> base;
@@ -59,14 +83,14 @@ class Allocator {
 
 class AllocRet {
   public:
-    __aicore__ AllocRet(Allocator *allocator, uint32_t id,AscendC::LocalTensor<Float> buf) : allocator(allocator), id(id),buffer(buf) {}
+    __aicore__ AllocRet(Allocator *allocator, uint32_t id, AscendC::LocalTensor<Float> buf) : allocator(allocator), id(id), buffer(buf) {}
     __aicore__ ~AllocRet();
 
     AscendC::LocalTensor<Float> buffer;
 
-    const uint32_t GetId() const { return id; }
+    __aicore__ const uint32_t GetId() const { return id; }
 
   private:
-    Allocator* allocator;
+    Allocator *allocator;
     uint32_t id;
 };
