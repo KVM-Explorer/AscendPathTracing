@@ -8,6 +8,8 @@ height = 16
 samples = 1
 eps = 1e-4
 
+
+
 def gen_rays(w, h, s):
 
     rays = []
@@ -113,6 +115,8 @@ def test_scene(rays, spheres):
     ret = np.zeros((rays.shape[0], 3), dtype=np.float32)
     print("ret", ret.shape) 
 
+    rays = rays.astype(np.float32)
+    spheres = spheres.astype(np.float32)
 
     # for i in range(3):
     #     print("sphere content:",np.round(spheres[i],2))
@@ -123,10 +127,14 @@ def test_scene(rays, spheres):
         for k,sphere in enumerate(spheres):
             # print(ray, sphere)
             op = sphere[1:4] - ray[0] # L = O - C
+            # print("op",op)
             b = np.dot(op, ray[1]) # b = L * D
+            b2 = b * b # TODO: remove
+            c = np.dot(op, op) - sphere[0] # c = L^2 - r^2 TODO: remove
             det = b * b - np.dot(op, op) + sphere[0] # det = b^2 - L^2 + r^2
             if det < 0:
                 continue
+            # print(det)
             det = np.sqrt(det)
             t0 = b - det
             t1 = b + det
@@ -150,19 +158,65 @@ def test_scene(rays, spheres):
             else:
                 ret[i] = spheres[sphere_id, 7:10]
         
-        if i % 100 == 0:
-            print("hit sphere: ", sphere_id," ,min_dis: ", min_distance)
+        # if i % 100 == 0:
+        #     print("hit sphere: ", sphere_id," ,min_dis: ", min_distance)
+        # print()
 
     ret = ret.T
     #print("ret", ret.shape)
     ret.astype(np.float32).tofile("./output/test_scene.bin")
 
+def sim_npu(rays,spheres,k,j,block_len,tilings_len):
+    for i in range(0,spheres.shape[1]):
+        cur_rays = rays[:, 
+                        k * block_len + j * tilings_len + i: 
+                        k * block_len + j * tilings_len + i + tilings_len]                
+        ocX = spheres[1,i] - cur_rays[0,:]
+        ocY = spheres[2,i] - cur_rays[1,:]
+        ocZ = spheres[3,i] - cur_rays[2,:]
+
+        b = ocX * cur_rays[3,:] + ocY * cur_rays[4,:] + ocZ * cur_rays[5,:]
+        c = ocX * ocX + ocY * ocY + ocZ * ocZ - spheres[0,i]
+
+        det = b * b - c
+
+        detsqrt = np.sqrt(det)
+
+        t0 = b - detsqrt
+        t1 = b + detsqrt
+
+        bitmask = (t0 > eps)
+        # convert to uint8 使用bit位来表示是否命中
+        
+        return
+
+def test_soa(rays,spheres):
+    rays = rays.astype(np.float32)
+    spheres = spheres.astype(np.float32)
+
+    rays = rays.reshape(-1,6).T
+    spheres = spheres.reshape(-1,10).T
+    print("rays shape",rays.shape)
 
 
-    
+    core_num = 8
+    tilings_len = 64
+    block_len = rays.shape[1] // core_num
+    tilings_num = block_len // tilings_len
+    print("block_len",block_len)
+    print("tilings_num",tilings_num)
+
+    for k in range(0,core_num):
+        for j in range(0,tilings_num):
+            sim_npu(rays,spheres,k,j,block_len,tilings_len)
+
+
+
+
 if __name__ == "__main__":
     np.set_printoptions(formatter={'float_kind': lambda x: f"{x:.5f}"}, precision=2)
-
+    np.random.seed(0)
     rays = gen_rays(width, height, samples)
     spheres = gen_spheres()
     # test_scene(rays, spheres)
+    # test_soa(rays, spheres)

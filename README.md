@@ -25,3 +25,4 @@ NPU版本的算子无法支持常见系统库函数，CCE编译器缺少对应�
 ## TODO
 
 - 迁移到xmake,便于调试和运行
+- 实现一个简单的MemoryPool和allocator负责管理分配临时内存

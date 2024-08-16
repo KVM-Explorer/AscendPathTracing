@@ -11,7 +11,6 @@ constexpr int32_t TILING_NUM = 1;                                         // cus
 constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
 constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
 
-
 class KernelRender {
 
   public:
@@ -22,7 +21,7 @@ class KernelRender {
         height = h;
         samples = s;
 
-        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx();
+        int32_t block_offset = BLOCK_LENGTH * GetBlockIdx(); // 每个Core计算一部分竖条纹
 
         InitRaySoA(inputRays, r, block_offset, BLOCK_LENGTH);
         InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
@@ -34,14 +33,15 @@ class KernelRender {
 
         pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
-        pipe.InitBuffer(tmpBuf, TILING_LENGTH * sizeof(Float) * (8 + SPHERE_NUM));
+        pipe.InitBuffer(tmpBuf, TILING_LENGTH * sizeof(Float) * (3 + SPHERE_NUM + 8));
         pipe.InitBuffer(maskBuf, 128);
-        pipe.InitBuffer(tmpIndexBuf,SPHERE_NUM * sizeof(uint32_t));
+        pipe.InitBuffer(tmpIndexBuf, SPHERE_NUM * sizeof(uint32_t));
 
         // REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(), mm); // 初始化
     }
 
     __aicore__ inline void Process() {
+        DataFormatCheck();
 
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
 
@@ -59,6 +59,12 @@ class KernelRender {
     }
 
   private:
+    __aicore__ inline void DataFormatCheck() {
+        ASSERT(TOTAL_NUM % USE_CORE_NUM == 0);  // ,"Total num must be divisible by use core num"
+        ASSERT(BLOCK_LENGTH % TILING_NUM == 0); // ,"Block length must be divisible by tiling num"
+        ASSERT(TILING_LENGTH == 64);            // ,"Tiling length must be 64"
+    }
+
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
         sphereData = sphereBuf.Get<Float>();
@@ -68,8 +74,8 @@ class KernelRender {
     __aicore__ inline void GenerateIndices() {
         indexData = tmpIndexBuf.Get<uint32_t>();
         uint32_t cur = 0;
-        for(int i=0;i<SPHERE_NUM;i++){
-            indexData.SetValue(i,cur);
+        for (int i = 0; i < SPHERE_NUM; i++) {
+            indexData.SetValue(i, cur);
             cur += TILING_LENGTH;
         }
     }
@@ -104,120 +110,114 @@ class KernelRender {
 
         LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
 
-        LocalTensor<Float> ocX = tmpBuffer[0];
-        LocalTensor<Float> ocY = tmpBuffer[TILING_LENGTH * 1];
-        LocalTensor<Float> ocZ = tmpBuffer[TILING_LENGTH * 2];
-        LocalTensor<Float> tmp1 = tmpBuffer[TILING_LENGTH * 3];
-        LocalTensor<Float> tmp2 = tmpBuffer[TILING_LENGTH * 4];
-        LocalTensor<Float> tmp3 = tmpBuffer[TILING_LENGTH * 5];
-        LocalTensor<Float> b = tmpBuffer[TILING_LENGTH * 6];
-        LocalTensor<Float> c = tmpBuffer[TILING_LENGTH * 7];
-        LocalTensor<Float> stage1val = tmpBuffer[TILING_LENGTH * 8];
+        int32_t tmp_addr = 0;
+        VecLocalSoA ret;
+        ret.Init(tmpBuffer[tmp_addr], TILING_LENGTH);
+        tmp_addr += TILING_LENGTH * 3; // ray count * 3
+        LocalTensor<Float> stage1val = tmpBuffer[tmp_addr];
+        tmp_addr += TILING_LENGTH * SPHERE_NUM; // ray count * SPHERE_NUM
+
+        LocalTensor<Float> sharedTmpBuffer = tmpBuffer[tmp_addr]; // ray count  * 8
 
         LocalTensor<uint8_t> maskeBase = maskBuf.Get<uint8_t>();
-        LocalTensor<uint8_t> mask1 = maskeBase[0];  // addr: 0  half128bit，float64bit-> 8Bytes
-        LocalTensor<uint8_t> mask2 = maskeBase[32]; // addr: TILE_LENGTH/8 -> 8Bytes FIXME: 不满足32Bytes对齐
+        LocalTensor<uint8_t> retMask = maskeBase[0]; // addr: 0  half128bit，float64bit-> 8Bytes
+        LocalTensor<uint8_t> mask2 = maskeBase[32];  // addr: TILE_LENGTH/8 -> 8Bytes FIXME: 不满足32Bytes对齐
         LocalTensor<uint8_t> mask3 = maskeBase[64];
         LocalTensor<uint8_t> stage1mask = maskeBase[96];
 
-
         // count
-        int32_t count = TILING_LENGTH;
         RayLocalSoA rays;
-        rays.ox = ray[TILING_LENGTH * 0];
-        rays.oy = ray[TILING_LENGTH * 1];
-        rays.oz = ray[TILING_LENGTH * 2];
-        rays.dx = ray[TILING_LENGTH * 3];
-        rays.dy = ray[TILING_LENGTH * 4];
-        rays.dz = ray[TILING_LENGTH * 5];
+        rays.Init(ray, TILING_LENGTH);
 
         VecLocalSoA colors;
-        colors.x = color[TILING_LENGTH * 0];
-        colors.y = color[TILING_LENGTH * 1];
-        colors.z = color[TILING_LENGTH * 2];
+        colors.Init(color, TILING_LENGTH);
 
         SphereLocalSoA spheres;
-        int sphere_offset = 0;
-        spheres.r2 = sphereData[sphere_offset + SPHERE_NUM * 0];
-        spheres.x = sphereData[sphere_offset + SPHERE_NUM * 1];
-        spheres.y = sphereData[sphere_offset + SPHERE_NUM * 2];
-        spheres.z = sphereData[sphere_offset + SPHERE_NUM * 3];
-        spheres.emissionX = sphereData[sphere_offset + SPHERE_NUM * 4];
-        spheres.emissionY = sphereData[sphere_offset + SPHERE_NUM * 5];
-        spheres.emissionZ = sphereData[sphere_offset + SPHERE_NUM * 6];
-        spheres.colorX = sphereData[sphere_offset + SPHERE_NUM * 7];
-        spheres.colorY = sphereData[sphere_offset + SPHERE_NUM * 8];
-        spheres.colorZ = sphereData[sphere_offset + SPHERE_NUM * 9];
+        spheres.Init(sphereData);
 
         // Step1: compute ray-sphere intersection
         for (int i = 0; i < SPHERE_NUM; i++) {
-            int offset = i * count;
+            int offset = i * TILING_LENGTH;
+            // clang-format off
+            auto cur_sphere =Sphere{
+                .r2 = spheres.r2.GetValue(i), 
+                .x = spheres.x.GetValue(i), 
+                .y = spheres.y.GetValue(i),
+                .z = spheres.z.GetValue(i)};
+            // clang-format on
+            auto dst = stage1val[offset];
+            SphereHitInfo(dst, sharedTmpBuffer, cur_sphere, rays, TILING_LENGTH);
+        }
 
-            Adds(ocX, rays.ox, -spheres.x.GetValue(i), count); // ocX = rays.ox - spheres.x
-            Adds(ocY, rays.oy, -spheres.y.GetValue(i), count); // ocY = rays.oy - spheres.y
-            Adds(ocZ, rays.oz, -spheres.z.GetValue(i), count); // ocZ = rays.oz - spheres.z
+        // if (get_block_idx() == 0) {
+        //     for (int i = 0; i < SPHERE_NUM; i++) {
+        //         printf("Core: %ld sphere:%d\n", GetBlockIdx(), i);
+        //         for (int j = 0; j < TILING_LENGTH; j++) {
+        //             printf("%5.2f, ", stage1val.GetValue(i * TILING_LENGTH + j));
+        //         }
+        //         printf("\n============\n");
+        //     }
+        // }
 
-            Muls(tmp1, ocX, rays.ox.GetValue(i), count); // tmp1 = ocX * rays.ox
-            Muls(tmp2, ocY, rays.oy.GetValue(i), count); // tmp2 = ocY * rays.oy
-            Muls(tmp3, ocZ, rays.oz.GetValue(i), count); // tmp3 = ocZ * rays.oz
+        // Reset val(<0) to INF
+        // CompareScalar(stage1val,stage1val,Float(0),CMPMODE::GT,count*SPHERE_NUM); // mask = t > 0
+        // Select(stage1val,mask1,stage1val,Float(1e20),SELMODE::VSEL_CMPMASK_SPR,SPHERE_NUM*count); // t = mask1 ? t : INF
+        // for(int i=0;i<SPHERE_NUM;i++){
+        //     printf("Core: %ld sphere:%d\n",GetBlockIdx(),i);
+        //     for(int j=0;j<count;j++){
+        //         printf("%5.2f, ",stage1val.GetValue(i*count+j));
+        //     }
+        //     printf("============\n");
+        // }
 
-            Add(b, tmp1, tmp2, count); // b = tmp1 + tmp2 + tmp3
-            Add(b, b, tmp3, count);
+        // Step2: compute color | Force Format to 256Bytes RayGroup
+        uint64_t uint64Mask = (1ULL << 63);
+        for (int i = 0; i < TILING_LENGTH; i++) {
+            const uint64_t ray_mask[] = {(uint64Mask >> i), 0};
+            LocalTensor<Float> tmp1 = tmpBuffer[tmp_addr];
+            LocalTensor<Float> tmp2 = tmpBuffer[tmp_addr + TILING_LENGTH];
+            // worklocal space:
 
-            Mul(tmp1, ocX, ocX, count); // tmp1 = ocX * ocX
-            Mul(tmp2, ocY, ocY, count); // tmp2 = ocY * ocY
-            Mul(tmp3, ocZ, ocZ, count); // tmp3 = ocZ * ocZ
+            ReduceMin<Float>(tmp1, stage1val, tmp2, ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
+            auto val = tmp1.GetValue(0);
 
-            Add(c, tmp1, tmp2, count); // c = tmp1 + tmp2 + tmp3 - r^2 //TODO: 使用AddMul优化
-            Add(c, c, tmp3, count);
-            Adds(c, c, -spheres.r2.GetValue(i), count);
+            auto index = tmp1.ReinterpretCast<uint32_t>().GetValue(1);
+            index = index / TILING_LENGTH;
 
-            // disc = b^2 - c
-            Mul(tmp1, b, b, count); // tmp1 = b * b
+            // if (GetBlockIdx() == 0) {
+            //     printf("id:%d, val:%f, index:%d\n", i, val, index);
+            // }
 
-            // mask1 = c > 0, 每个mask 64位正好对应Float 的256Bytes
-            CompareScalar(mask1, c, Float(0), CMPMODE::GT, count);
+            // hit sphere
+            if (val > 0) {
 
-            auto repeat = TILING_LENGTH * sizeof(Float) / 256; // 256 Bytes为单位读取
+                colors.x.SetValue(i,spheres.colorX.GetValue(index));
+                colors.y.SetValue(i,spheres.colorY.GetValue(index));
+                colors.z.SetValue(i,spheres.colorZ.GetValue(index));
 
-            {
-                auto &discrSq = tmp2;
-                auto &t0 = tmp3;
-                auto &t1 = tmp1;
+                // color 0.1 0.5 0.7
+                // colors.x.SetValue(i, Float(0.0));
+                // colors.y.SetValue(i, Float(1.0));
+                // colors.z.SetValue(i, Float(0.0));
+            } else {
 
-                Sqrt(discrSq, tmp1, count); // tmp2 = sqrt(tmp1)
+                Float cx, cy, cz;
+                Float ex, ey, ez;
+                ex = spheres.emissionX.GetValue(index);
+                ey = spheres.emissionX.GetValue(index);
+                ez = spheres.emissionX.GetValue(index);
 
-                Sub(t0, b, discrSq, count); // t0 = b - discrSq
-                Add(t1, b, discrSq, count); // t1 = b + discrSq
-
-                // mask2 FIXME: mask 也需要32Bytes 对齐
-                CompareScalar(mask2, t0, Float(0), CMPMODE::GT, count);                            // mask2 = t0 > 0
-                Select(stage1val[offset], mask2, t0, t1, SELMODE::VSEL_TENSOR_TENSOR_MODE, count); // t = mask2 ? t0 : t1  
-                // Tips: t still may < 0
-
-                // mask3
-                // mask3 = t > 0 && t in mask1
-                // CompareScalar(mask3,stage1val,Float(0),CMPMODE::GT,count); // mask3 = t > 0
-                // And(stage1mask.ReinterpretCast<uint16_t>(),mask3.ReinterpretCast<uint16_t>(),mask1.ReinterpretCast<uint16_t>(),count/8/ sizeof(uint16_t)); // retMask = mask3 & mask1
+                colors.x.SetValue(i, 0);
+                colors.y.SetValue(i, 0);
+                colors.z.SetValue(i, 0);
             }
         }
 
-
-        // Step2: compute color
-        for (int i = 0; i < count; i++) {
-            Gather(tmp1, stage1val, indexData, i, SPHERE_NUM); 
-            CompareScalar(mask1, tmp1, Float(0), CMPMODE::GT, SPHERE_NUM); // mask = t > 0 ，FIXME: 数据量太少没有256Byte对齐 需要保证calc * sizeof(element) % 256 == 0
-            if(mask3.GetValue(0)==0){ // 8个sphere没有交点
-                colors.x.SetValue(i, Float(0));
-                colors.y.SetValue(i, Float(0));
-                colors.z.SetValue(i, Float(0));
-                continue;
-            }else{
-                colors.x.SetValue(i, Float(0.1));
-                colors.y.SetValue(i, Float(0.5));
-                colors.z.SetValue(i, Float(0.7));
-            }            
-        }
+        // for (int i = 0; i < TILING_LENGTH; i++) {
+        //     colors.x.SetValue(i, rays.dx.GetValue(i));
+        //     colors.y.SetValue(i, rays.dy.GetValue(i));
+        //     colors.z.SetValue(i, rays.dz.GetValue(i));
+        // }
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
