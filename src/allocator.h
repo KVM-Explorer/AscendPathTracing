@@ -86,7 +86,7 @@ class Allocator {
 
                 LinkList *node2 = &Pool[id2];
                 node2->Init(id2, p->data.start + size, p->data.end);
-                InsertNode(p, node2);
+                InsertNode (p, node2);
 
                 LinkList *node1 = &Pool[id1];
                 node1->Init(id1, p->data.start, p->data.start + size, false);
@@ -100,7 +100,10 @@ class Allocator {
                 return {this, id1, base[node1->data.start]};
             }
         }
-        // throw std::runtime_error("no enough memory");
+#ifdef __CCE_KT_TEST__
+        throw std::runtime_error("no enough memory");
+#endif
+        return {nullptr, 0, base[0]};
     }
 
     __aicore__ void Free(uint32_t id) {
@@ -147,10 +150,31 @@ class Allocator {
         // }
     }
 
+#ifdef __CCE_KT_TEST__
+    __aicore__ inline bool Check(uint32_t id) {
+        for (auto p = head; p != nullptr; p = p->next) {
+            if (p->data.id == id) {
+                return p->data.is_free;
+            }
+        }
+        throw std::runtime_error("CHECK::no such memory resource");
+        return false;
+    }
+#endif
+
   private:
+    __aicore__ inline bool Contains(uint32_t id) {
+        for (auto p = head; p != nullptr; p = p->next) {
+            if (p->data.id == id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     __aicore__ uint32_t GetNewId() {
         while (true) {
-            if (Pool[id].data.is_free) {
+            if (!Contains(id)) {
                 break;
             }
             id = (id + 1) % MAX_NUM;
@@ -210,7 +234,10 @@ class Allocator {
             node->Init(new_id, start, end);
             InsertNode(cur, node);
             DeleteNode(cur);
+            if(node->data.start == node->data.end) 
+                throw std::runtime_error("merge error");
         }
+        
     }
 
     LinkList *head;
@@ -228,7 +255,14 @@ class AllocDecorator {
     __aicore__ inline AllocDecorator(AllocInfo info) : allocInfo(info) {}
     __aicore__ inline ~AllocDecorator() { allocInfo.allocator->Free(allocInfo.id); }
 
-    __aicore__ inline AscendC::LocalTensor<Float> &Get() { return allocInfo.buffer; } 
+    __aicore__ inline AscendC::LocalTensor<Float> &Get() { 
+        #ifdef __CCE_KT_TEST__
+            if(allocInfo.allocator->Check(allocInfo.id)){
+                printf("warning: double free %d\n", allocInfo.id);
+            }
+        #endif
+        
+        return allocInfo.buffer; }
     // __aicore__ const uint32_t GetId() const { return id; }
 
   private:
