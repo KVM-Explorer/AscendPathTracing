@@ -34,6 +34,9 @@
 build
 add_cpu
 add_npu
+render_cpu
+render_npu
+render_sim
 input
 output
 npuchk
@@ -41,5 +44,4 @@ cceprint
 .vscode/.cache  
 .vscode/compile_commands.json
 
-render_cpu
 *.log

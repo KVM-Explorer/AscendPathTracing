@@ -223,6 +223,7 @@ class KernelRender {
     TPipe pipe;
 };
 
+// cpu kernel function
 extern "C" __global__ __aicore__ void render(GM_ADDR rays, GM_ADDR spheres, GM_ADDR colors) {
     KernelRender op;
 
@@ -231,6 +232,7 @@ extern "C" __global__ __aicore__ void render(GM_ADDR rays, GM_ADDR spheres, GM_A
     op.Release();
 }
 
+// npu kernel function
 #ifndef __CCE_KT_TEST__
 // call of kernel function
 void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uint8_t *spheres, uint8_t *colors) {
