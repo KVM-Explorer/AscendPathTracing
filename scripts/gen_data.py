@@ -166,11 +166,18 @@ def test_scene(rays, spheres):
     #print("ret", ret.shape)
     ret.astype(np.float32).tofile("./output/test_scene.bin")
 
-def sim_npu(rays,spheres,k,j,block_len,tilings_len):
-    for i in range(0,spheres.shape[1]):
-        cur_rays = rays[:, 
-                        k * block_len + j * tilings_len + i: 
-                        k * block_len + j * tilings_len + i + tilings_len]                
+def sim_npu(rays,spheres,k,j,block_len,tilings_len,cur_buffer):
+    ret = np.zeros((2,tilings_len),dtype=np.float32) # min_distance, sphere_id
+    start = k * block_len + j * tilings_len  + cur_buffer * tilings_len
+    end = k * block_len + j * tilings_len +  tilings_len + cur_buffer * tilings_len
+    stage1val = np.zeros((spheres.shape[1],tilings_len),dtype=np.float32)
+
+    for i in range(0,spheres.shape[1]): # shape(10,8)
+        # print("Current Sphere: ",i)
+        
+        # print("ray range: ",start, " to ", end)
+        cur_rays = rays[:,start:end]
+
         ocX = spheres[1,i] - cur_rays[0,:]
         ocY = spheres[2,i] - cur_rays[1,:]
         ocZ = spheres[3,i] - cur_rays[2,:]
@@ -184,11 +191,17 @@ def sim_npu(rays,spheres,k,j,block_len,tilings_len):
 
         t0 = b - detsqrt
         t1 = b + detsqrt
+        # if t0 > eps select t0 else select t1
 
-        bitmask = (t0 > eps)
-        # convert to uint8 使用bit位来表示是否命中
-        
-        return
+        if(k ==0 and i == 0):
+            print("sphere: ",i," t0: ",t0)
+            print("sphere: ",i," t1: ",t1)
+
+        stage1val[i] = np.where((t0 > eps), t0, t1)
+        # force set stage1val where item < eps to 1e20
+        stage1val[i] = np.where((stage1val[i] > eps), stage1val[i],1e20)
+    
+    return stage1val
 
 def test_soa(rays,spheres):
     rays = rays.astype(np.float32)
@@ -202,13 +215,61 @@ def test_soa(rays,spheres):
     core_num = 8
     tilings_len = 64
     block_len = rays.shape[1] // core_num
-    tilings_num = block_len // tilings_len
+    buffer_num = 2
+    tilings_num = block_len // (tilings_len * buffer_num)
     print("block_len",block_len)
     print("tilings_num",tilings_num)
 
+    stage1val = np.zeros((spheres.shape[1],rays.shape[1]),dtype=np.float32)
+    print("stage1val shape",stage1val.shape)
+
+
     for k in range(0,core_num):
         for j in range(0,tilings_num):
-            sim_npu(rays,spheres,k,j,block_len,tilings_len)
+            for i in range(0,buffer_num):
+                # print("-> Core/Block: ",k," Tiling Num: ",j," Buffer Num: ",i)
+                tmp = sim_npu(rays,spheres,k,j,block_len,tilings_len,i)
+
+                # 合并tmp到stage1val
+                start = k * block_len + j * tilings_len  + i * tilings_len
+                end = k * block_len + j * tilings_len +  tilings_len + i * tilings_len
+
+                stage1val[:,start:end] = tmp
+
+    print("stage1val",stage1val)
+    stage1val = stage1val.T
+    print("stage1val T",stage1val)
+    print("stage1val shape",stage1val.shape)
+
+    # stage2 reduce min_distance and sphere_id
+    reduce_ret = np.zeros((rays.shape[1],3),dtype=np.float32)
+    for i in range(0,rays.shape[1]):
+        min_distance = 1e20
+        sphere_id = -1
+        count = -1
+        for j in range(0,spheres.shape[1]):
+            if stage1val[i,j] == min_distance:
+                count += 1
+            if stage1val[i,j] < min_distance:
+                min_distance = stage1val[i,j]
+                sphere_id = j
+                count = 1
+            
+        reduce_ret[i] = np.array([min_distance,sphere_id,count])
+    
+    #print all reduce_ret | but np only print part of it
+    print("reduce_ret shape: ",reduce_ret.shape)
+    multi_same = 0
+    for i in range(0,reduce_ret.shape[0]):
+        if(reduce_ret[i][2] > 1):
+            multi_same += 1
+            print("multi_same: ",reduce_ret[i])
+    print("multi_same count: ",multi_same)
+
+
+
+    
+
 
 
 
