@@ -38,7 +38,7 @@ def decode_color(w, h, s):
     for i in range(w):
         for j in range(h):
             u =h - j - 1
-            pixel_values = colors[i, j, :, :]
+            pixel_values = colors[i, u, :, :]
             new_colors[i, j] = np.mean(pixel_values, axis=0)
 
 

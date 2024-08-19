@@ -258,16 +258,41 @@ def test_soa(rays,spheres):
         reduce_ret[i] = np.array([min_distance,sphere_id,count])
     
     #print all reduce_ret | but np only print part of it
-    print("reduce_ret shape: ",reduce_ret.shape)
-    multi_same = 0
+    # print("reduce_ret shape: ",reduce_ret.shape)
+    # multi_same = 0
+    # for i in range(0,reduce_ret.shape[0]):
+    #     if(reduce_ret[i][2] > 1):
+    #         multi_same += 1
+    #         print("multi_same: ",reduce_ret[i])
+    # print("multi_same count: ",multi_same)
+
+    # stage3 compute new ray pos and direction
+    new_ray = np.zeros((rays.shape[1],6),dtype=np.float32)
     for i in range(0,reduce_ret.shape[0]):
-        if(reduce_ret[i][2] > 1):
-            multi_same += 1
-            print("multi_same: ",reduce_ret[i])
-    print("multi_same count: ",multi_same)
+        new_ray[i,0:3] = rays[0:3,i] + rays[3:6,i] * reduce_ret[i,0] # pos = pos + dir * min_distance
+
+        # compute normal and direction
+        normal = new_ray[i,0:3] - spheres[1:4,int(reduce_ret[i,1])] # pos - sphere_pos
+        normal = normal / np.linalg.norm(normal) # normalize
+        new_ray[i,3:6] = rays[3:6,i] - 2 * np.dot(rays[3:6,i],normal) * normal # dir = dir - 2 * dot(dir,normal) * normal
+        
+    # new_ray = new_ray.T
+    print("new_ray shape: ",new_ray.shape)
+    print("new_ray: ")
+    for i in range(0,10):
+        print("idx: ",i,"xyz:",new_ray[i,0:3],"dir:",new_ray[i,3:6])
+
+    for i in range(0,10):
+        print("idx: ",i,"xyz:",rays[0:3,i],"dir:",rays[3:6,i])
+
+    # stage4 compute color
+    ret_color = np.zeros((rays.shape[1],3),dtype=np.float32)
+    for i in range(0,reduce_ret.shape[0]):
+        ret_color[i] = spheres[7:10,int(reduce_ret[i,1])]
 
 
-
+    ret_color = ret_color.T
+    ret_color.astype(np.float32).tofile("./output/test_soa.bin")
     
 
 
