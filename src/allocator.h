@@ -86,7 +86,7 @@ class Allocator {
 
                 LinkList *node2 = &Pool[id2];
                 node2->Init(id2, p->data.start + size, p->data.end);
-                InsertNode (p, node2);
+                InsertNode(p, node2);
 
                 LinkList *node1 = &Pool[id1];
                 node1->Init(id1, p->data.start, p->data.start + size, false);
@@ -234,10 +234,9 @@ class Allocator {
             node->Init(new_id, start, end);
             InsertNode(cur, node);
             DeleteNode(cur);
-            if(node->data.start == node->data.end) 
+            if (node->data.start == node->data.end)
                 throw std::runtime_error("merge error");
         }
-        
     }
 
     LinkList *head;
@@ -253,18 +252,35 @@ class Allocator {
 class AllocDecorator {
   public:
     __aicore__ inline AllocDecorator(AllocInfo info) : allocInfo(info) {}
-    __aicore__ inline ~AllocDecorator() { allocInfo.allocator->Free(allocInfo.id); }
+    __aicore__ inline ~AllocDecorator() {
+        if (!isFree)
+            allocInfo.allocator->Free(allocInfo.id);
+    }
 
-    __aicore__ inline AscendC::LocalTensor<Float> &Get() { 
-        #ifdef __CCE_KT_TEST__
-            if(allocInfo.allocator->Check(allocInfo.id)){
-                printf("warning: double free %d\n", allocInfo.id);
-            }
-        #endif
-        
-        return allocInfo.buffer; }
+    __aicore__ inline AscendC::LocalTensor<Float> &Get() {
+#ifdef __CCE_KT_TEST__
+        if (allocInfo.allocator->Check(allocInfo.id)) {
+            printf("warning: double free %d\n", allocInfo.id);
+        }
+        if (isFree) {
+            throw std::runtime_error("try to access a free memory");
+        }
+#endif
+
+        return allocInfo.buffer;
+    }
     // __aicore__ const uint32_t GetId() const { return id; }
+
+    __aicore__ inline void Release() {
+        if (!isFree) {
+            allocInfo.allocator->Free(allocInfo.id);
+            isFree = true;
+        } else {
+            throw std::runtime_error("try to double free mannually");
+        }
+    }
 
   private:
     AllocInfo allocInfo;
+    bool isFree = false;
 };
