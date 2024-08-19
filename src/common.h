@@ -11,3 +11,5 @@ const int32_t SPHERE_NUM = 8;
 const int32_t SPHERE_MEMBER_NUM = 10;
 using Float = float;
 
+const int32_t GENERIC_SIZE = 64;
+
