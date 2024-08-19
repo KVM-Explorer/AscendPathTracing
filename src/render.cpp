@@ -6,11 +6,10 @@ using namespace AscendC;
 using namespace std;
 
 constexpr int32_t TOTAL_NUM = WIDTH * HEIGHT * SAMPLES * 4;
-constexpr int32_t USE_CORE_NUM = 8;                                       // device core num
-constexpr int32_t BLOCK_LENGTH = TOTAL_NUM / USE_CORE_NUM;                // 每个block处理的数据量(非字节数)
-constexpr int32_t TILING_NUM = 1;                                         // custom config
-constexpr int32_t BUFFER_NUM = 2;                                         // fix double buffer -> pipeline
-constexpr int32_t TILING_LENGTH = BLOCK_LENGTH / TILING_NUM / BUFFER_NUM; // 真正每次处理的数据数量(非字节数)
+constexpr int32_t USE_CORE_NUM = 8;                                        // device core num
+constexpr int32_t BLOCK_LENGTH = TOTAL_NUM / USE_CORE_NUM;                 // 每个block处理的数据量(非字节数)
+constexpr int32_t BUFFER_NUM = 2;                                          // fix double buffer -> pipeline
+constexpr int32_t TILING_NUM = BLOCK_LENGTH / (GENERIC_SIZE * BUFFER_NUM); // custom config
 
 class KernelRender {
 
@@ -28,24 +27,26 @@ class KernelRender {
         InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
         inputSpheres.SetGlobalBuffer((__gm__ Float *)spheres, SPHERE_NUM * SPHERE_MEMBER_NUM);
 
-        pipe.InitBuffer(rayQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 6);        // ray xyz dxdydz = 6
-        pipe.InitBuffer(colorQueue, BUFFER_NUM, TILING_LENGTH * sizeof(Float) * 3);      // color xyz = 3
+        pipe.InitBuffer(rayQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 6);         // ray xyz dxdydz = 6
+        pipe.InitBuffer(colorQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 3);       // color xyz = 3
         pipe.InitBuffer(sphereQueue, 1, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
         pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
 
-        pipe.InitBuffer(tmpBuf, TILING_LENGTH * sizeof(Float) * (3 + SPHERE_NUM + 8 + 20));
+        pipe.InitBuffer(tmpBuf, GENERIC_SIZE * sizeof(Float) * (SPHERE_NUM + 20 + 20));
         pipe.InitBuffer(tmpIndexBuf, SPHERE_NUM * sizeof(uint32_t));
     }
 
     __aicore__ inline void Process() {
+#ifdef __CCE_KT_TEST__
         // if (GetBlockIdx() == 0) {
         //     printf("core %ld\n", GetBlockIdx());
         //     auto ch = getchar();
         // }
-
+#endif
         DataFormatCheck();
         InitAllocator();
+
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
 
         UploadSpheres();
@@ -57,20 +58,21 @@ class KernelRender {
     }
 
     __aicore__ inline void Release() {
-        
+
         // free local tensor
     }
 
   private:
     __aicore__ inline void DataFormatCheck() {
-        ASSERT(TOTAL_NUM % USE_CORE_NUM == 0);  // ,"Total num must be divisible by use core num"
-        ASSERT(BLOCK_LENGTH % TILING_NUM == 0); // ,"Block length must be divisible by tiling num"
-        ASSERT(TILING_LENGTH == 64);            // ,"Tiling length must be 64"
+        ASSERT(TOTAL_NUM % USE_CORE_NUM == 0);    // ,"Total num must be divisible by use core num"
+        ASSERT(BLOCK_LENGTH % TILING_NUM == 0);   // ,"Block length must be divisible by tiling num"
+        ASSERT(GENERIC_SIZE == 64);               // ,"Tiling length must be 64"
+        ASSERT(BLOCK_LENGTH % GENERIC_SIZE == 0); // ,"Block length must be divisible by tiling length"
     }
 
     __aicore__ inline void InitAllocator() {
         LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
-        allocator.Init(tmpBuffer, TILING_LENGTH * (SPHERE_NUM + 20));
+        allocator.Init(tmpBuffer, GENERIC_SIZE * (SPHERE_NUM + 20 + 20));
     }
 
     // upload sphere data to device memory
@@ -84,19 +86,19 @@ class KernelRender {
         LocalTensor<Float> ray = rayQueue.AllocTensor<Float>();
 
         // offset
-        int32_t r_x = TILING_LENGTH * 0;
-        int32_t r_y = TILING_LENGTH * 1;
-        int32_t r_z = TILING_LENGTH * 2;
-        int32_t r_dx = TILING_LENGTH * 3;
-        int32_t r_dy = TILING_LENGTH * 4;
-        int32_t r_dz = TILING_LENGTH * 5;
+        int32_t r_x = GENERIC_SIZE * 0;
+        int32_t r_y = GENERIC_SIZE * 1;
+        int32_t r_z = GENERIC_SIZE * 2;
+        int32_t r_dx = GENERIC_SIZE * 3;
+        int32_t r_dy = GENERIC_SIZE * 4;
+        int32_t r_dz = GENERIC_SIZE * 5;
 
-        DataCopy(ray[r_x], inputRays.ox[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_y], inputRays.oy[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_z], inputRays.oz[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dx], inputRays.dx[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dy], inputRays.dy[progress * TILING_LENGTH], TILING_LENGTH);
-        DataCopy(ray[r_dz], inputRays.dz[progress * TILING_LENGTH], TILING_LENGTH);
+        DataCopy(ray[r_x], inputRays.ox[progress * GENERIC_SIZE], GENERIC_SIZE);
+        DataCopy(ray[r_y], inputRays.oy[progress * GENERIC_SIZE], GENERIC_SIZE);
+        DataCopy(ray[r_z], inputRays.oz[progress * GENERIC_SIZE], GENERIC_SIZE);
+        DataCopy(ray[r_dx], inputRays.dx[progress * GENERIC_SIZE], GENERIC_SIZE);
+        DataCopy(ray[r_dy], inputRays.dy[progress * GENERIC_SIZE], GENERIC_SIZE);
+        DataCopy(ray[r_dz], inputRays.dz[progress * GENERIC_SIZE], GENERIC_SIZE);
 
         rayQueue.EnQue(ray);
     }
@@ -108,23 +110,32 @@ class KernelRender {
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
 
-        // VecLocalSoA ret;
-        // ret.Init(tmpBuffer[tmp_addr], TILING_LENGTH);
+        auto retBuffer = AllocDecorator(allocator.Alloc(GENERIC_SIZE * 3));
+        VecLocalSoA ret;
+        ret.Init(retBuffer.Get(), GENERIC_SIZE);
+        Duplicate(ret.x,Float(1.0),GENERIC_SIZE);
+        Duplicate(ret.y,Float(1.0),GENERIC_SIZE);
+        Duplicate(ret.z,Float(1.0),GENERIC_SIZE);
 
-        auto stage1val = AllocDecorator( allocator.Alloc(TILING_LENGTH * SPHERE_NUM));
+        auto retMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+
+        auto stage1val = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
+        auto stage1Trans = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
 
         RayLocalSoA rays;
-        rays.Init(ray, TILING_LENGTH);
+        rays.Init(ray, GENERIC_SIZE);
 
         VecLocalSoA colors;
-        colors.Init(color, TILING_LENGTH);
+        colors.Init(color, GENERIC_SIZE);
 
         SphereLocalSoA spheres;
         spheres.Init(sphereData);
 
+        int32_t cnt = 0;
+
         // Step1: compute ray-sphere intersection
         for (int i = 0; i < SPHERE_NUM; i++) {
-            int offset = i * TILING_LENGTH;
+            int offset = i * GENERIC_SIZE;
             // clang-format off
             auto cur_sphere =Sphere{
                 .r2 = spheres.r2.GetValue(i), 
@@ -133,50 +144,68 @@ class KernelRender {
                 .z = spheres.z.GetValue(i)};
             // clang-format on
             auto dst = stage1val.Get()[offset];
-            SphereHitInfo(dst, allocator, cur_sphere, rays, TILING_LENGTH);
+            SphereHitInfo(dst, allocator, cur_sphere, rays);
         }
 
-        // Step2: compute color | Force Format to 256Bytes RayGroup
-        uint64_t uint64Mask = (1ULL << 63);
-        for (int i = 0; i < TILING_LENGTH; i++) {
-            const uint64_t ray_mask[] = {(uint64Mask >> i), 0};
-            auto minResult = AllocDecorator(allocator.Alloc(TILING_LENGTH));
-            auto workspace = AllocDecorator(allocator.Alloc(TILING_LENGTH * 8)); // FIXME: 计算精准计算最小值需要的临时空间
+        // Step2: ray num of hit sphere -> sphere num of hit ray
+        Transpose(stage1Trans.Get(), stage1val.Get(), allocator);
+        stage1val.Release();
 
-            ReduceMin<Float>(minResult.Get(), stage1val.Get(), workspace.Get(), ray_mask, SPHERE_NUM, 8, true); // tmp1 = min(stage1val)
-            auto val = minResult.Get().GetValue(0);
+        // Step3: Compare & Get Min Index 8 float -> 32B = 1 block
+        auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+        auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+        ReduceMinInfo(hitIndex.Get(), hitMinT.Get(), stage1Trans.Get(), allocator);
+        stage1Trans.Release();
 
-            auto index = minResult.Get().ReinterpretCast<uint32_t>().GetValue(1);
-            index = index / TILING_LENGTH;
+        // DEBUG(
+        //     if (cnt == 0) {
+        //         CPUDumpTensorU("ReduceMin Index uint32_t",hitIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+        //         CPUDumpTensorU("ReduceMin Index int32_T",hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
+        //     }
+        // )
 
-            // hit sphere
-            if (val > 0) {
+        // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
+        GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator);
 
-                colors.x.SetValue(i, spheres.colorX.GetValue(index));
-                colors.y.SetValue(i, spheres.colorY.GetValue(index));
-                colors.z.SetValue(i, spheres.colorZ.GetValue(index));
-            } else {
+        // DEBUG({
+        //     if (cnt == 0)
+        //     {
+        //         CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
+        //         CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
+        //         CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
+        //         CPUDumpTensor("New ray dx", rays.dx, GENERIC_SIZE);
+        //         CPUDumpTensor("New ray dy", rays.dy, GENERIC_SIZE);
+        //         CPUDumpTensor("New ray dz", rays.dz, GENERIC_SIZE);
+        //     }
+        // })
 
-                Float cx, cy, cz;
-                Float ex, ey, ez;
-                ex = spheres.emissionX.GetValue(index);
-                ey = spheres.emissionX.GetValue(index);
-                ez = spheres.emissionX.GetValue(index);
+        // Step5: compute diffuse color & mask
+        AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator);
 
-                colors.x.SetValue(i, 0);
-                colors.y.SetValue(i, 0);
-                colors.z.SetValue(i, 0);
-            }
-        }
+        // Step6: compute final color
 
-        // for (int i = 0; i < TILING_LENGTH; i++) {
-        //     colors.x.SetValue(i, rays.dx.GetValue(i));
-        //     colors.y.SetValue(i, rays.dy.GetValue(i));
-        //     colors.z.SetValue(i, rays.dz.GetValue(i));
+        // Step7: write to device queue
+        // for (int i = 0; i < GENERIC_SIZE; i++) {
+        //     colors.x[i] = ret.x[i];
+        //     colors.y[i] = ret.y[i];
+        //     colors.z[i] = ret.z[i];
         // }
+
+        DEBUG(
+            if (cnt == 0) {
+                CPUDumpTensor("Final color x", ret.x, GENERIC_SIZE);
+                CPUDumpTensor("Final color y", ret.y, GENERIC_SIZE);
+                CPUDumpTensor("Final color z", ret.z, GENERIC_SIZE);
+            }
+        )
+
+        Muls(colors.x, ret.x, Float(1), GENERIC_SIZE);
+        Muls(colors.y, ret.y, Float(1), GENERIC_SIZE);
+        Muls(colors.z, ret.z, Float(1), GENERIC_SIZE);
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
+        cnt++;
     }
 
     // write device queue to system mem
@@ -184,13 +213,13 @@ class KernelRender {
         LocalTensor<Float> color = colorQueue.DeQue<Float>();
 
         // offset
-        int32_t c_x = TILING_LENGTH * 0;
-        int32_t c_y = TILING_LENGTH * 1;
-        int32_t c_z = TILING_LENGTH * 2;
+        int32_t c_x = GENERIC_SIZE * 0;
+        int32_t c_y = GENERIC_SIZE * 1;
+        int32_t c_z = GENERIC_SIZE * 2;
 
-        DataCopy(resultColor.x[progress * TILING_LENGTH], color[c_x], TILING_LENGTH);
-        DataCopy(resultColor.y[progress * TILING_LENGTH], color[c_y], TILING_LENGTH);
-        DataCopy(resultColor.z[progress * TILING_LENGTH], color[c_z], TILING_LENGTH);
+        DataCopy(resultColor.x[progress * GENERIC_SIZE], color[c_x], GENERIC_SIZE);
+        DataCopy(resultColor.y[progress * GENERIC_SIZE], color[c_y], GENERIC_SIZE);
+        DataCopy(resultColor.z[progress * GENERIC_SIZE], color[c_z], GENERIC_SIZE);
 
         colorQueue.FreeTensor(color);
     }
