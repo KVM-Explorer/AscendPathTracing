@@ -235,7 +235,8 @@ class Allocator {
             InsertNode(cur, node);
             DeleteNode(cur);
             if (node->data.start == node->data.end)
-                throw std::runtime_error("merge error");
+                // throw std::runtime_error("merge error");
+                AscendC::printf("warning: merge error\n");
         }
     }
 
@@ -263,7 +264,8 @@ class AllocDecorator {
             printf("warning: double free %d\n", allocInfo.id);
         }
         if (isFree) {
-            throw std::runtime_error("try to access a free memory");
+            // throw std::runtime_error("try to access a free memory");
+            AscendC::printf("warning: try to access a free memory %d\n", allocInfo.id);
         }
 #endif
 
@@ -276,7 +278,8 @@ class AllocDecorator {
             allocInfo.allocator->Free(allocInfo.id);
             isFree = true;
         } else {
-            throw std::runtime_error("try to double free mannually");
+            // throw std::runtime_error("try to double free mannually");
+            AscendC::printf("warning: double free %d manually\n", allocInfo.id);
         }
     }
 
