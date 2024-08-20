@@ -216,17 +216,24 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
 }
 
 __aicore__ inline void Transpose(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src, Allocator &allocator) {
-    auto indices = AllocDecorator(allocator.Alloc(SPHERE_NUM));
+    auto indices = AllocDecorator(allocator.Alloc(SPHERE_NUM * GENERIC_SIZE));
     // ArithProgression(indices.Get().ReinterpretCast<int32_t>(), int32_t(0), int32_t(GENERIC_SIZE), SPHERE_NUM); // half/float/int16_t/int32_t
-    for (int i = 0; i < SPHERE_NUM; i++) {
-        indices.Get().ReinterpretCast<uint32_t>().SetValue(i, uint32_t(i * GENERIC_SIZE * sizeof(Float)));
+
+    for (int i = 0; i < GENERIC_SIZE * SPHERE_NUM; i++) {
+        int32_t u=  i / SPHERE_NUM; // row
+        int32_t v = i % SPHERE_NUM; // col
+        int32_t pos = v * GENERIC_SIZE + u;
+        
+        indices.Get().ReinterpretCast<uint32_t>().SetValue(i, pos * sizeof(Float));
+        DEBUG({
+            if (i % 64 == 0) {
+                printf("\n");
+            }
+            printf("%d ", pos);
+        })
     }
 
-    for (int i = 0; i < GENERIC_SIZE; i++) {
-        int offset = i * SPHERE_NUM;
-        // srcoffset type: uint32_t
-        Gather(dst[offset], src, indices.Get().ReinterpretCast<uint32_t>(), i * sizeof(Float), SPHERE_NUM);
-    }
+    AscendC::Gather(dst,src,indices.Get().ReinterpretCast<uint32_t>(),0,GENERIC_SIZE * SPHERE_NUM);
 
     // BUG: Ascend Copy API Bitmask 存在模板实例化的bug
 }
