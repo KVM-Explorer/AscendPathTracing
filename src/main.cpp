@@ -22,7 +22,7 @@ int main() {
 #ifdef __CCE_KT_TEST__
 
     size_t inputRayByteSize = elementNums * sizeof(uint32_t) * 6; // TODO: 更新为不同的数据类型Float，Half等
-    size_t inputSphereByteSize = SPHERE_NUM * sizeof(uint32_t) * SPHERE_MEMBER_NUM; // r^2 xyz color emssion
+    size_t inputSphereByteSize = 512; // r^2 xyz color emssion
     size_t outputColorByteSize = elementNums * sizeof(uint32_t) * 3;
 
     uint8_t *rays = (uint8_t *)AscendC::GmAlloc(inputRayByteSize);
@@ -46,7 +46,7 @@ int main() {
 
 #else
     size_t inputRayByteSize = elementNums * sizeof(uint32_t) * 6; // rays
-    size_t inputSphereByteSize = SPHERE_NUM * sizeof(uint32_t) * SPHERE_MEMBER_NUM; // r^2 xyz color emssion
+    size_t inputSphereByteSize = 512; // r^2 xyz color emssion
     size_t outputColorByteSize = elementNums * sizeof(uint32_t) * 3;
 
     aclrtContext context;

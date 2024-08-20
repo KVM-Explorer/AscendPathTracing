@@ -82,7 +82,7 @@ Sphere spheres[] = {//Scene: radius, position, emission, color, material
 
 
 def gen_spheres():
-    spheres = np.array([]) # 8 spheres
+    spheres = np.array([],dtype=np.float32) # 8 spheres
     spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.75, 0.25, 0.25])  # radius, x, y, z, emission xyz, color xyz
     spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.25, 0.25, 0.75])
     spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.75, 0.75, 0.75])
@@ -105,13 +105,20 @@ def gen_spheres():
     spheres = spheres.T
     # print("sphere shape:",spheres.shape)
     # print(spheres)
-    spheres.astype(np.float32).tofile("./input/spheres.bin")
+    # spheres.astype(np.float32).tofile("./input/spheres.bin")
     # binary_spheres = spheres
-    # # 末尾填充0 保证是512B的倍数
-    # if spheres.shape[1] % 32 != 0:
-    #     pad_len = 32 - spheres.shape[1] % 32
-    #     spheres = np.concatenate([spheres, np.zeros((10, pad_len), dtype=np.float32)], axis=1)
-    # print("sphere shape:",spheres.shape)
+    # # 数据类型为Float32，末尾填充0 保证是512B的倍数
+    print("spheres shape: ",spheres.shape)
+    current_size =  spheres.size * 4
+    print("spheres size: ",current_size,"sphere itemsize: ", 4,"sphere size: ",spheres.size)
+    padding_size = 512 - current_size % 512
+    padding_elements =  padding_size // 4  
+    print("padding count: ",padding_elements)
+    binary_spheres = spheres.reshape(-1)
+    binary_spheres = np.append(binary_spheres, np.zeros(padding_elements))
+    binary_spheres.astype(np.float32).tofile("./input/spheres.bin")
+    print("binary_spheres shape: ",binary_spheres.shape)
+
 
     
     return spheres.T
@@ -286,26 +293,39 @@ def test_soa(rays,spheres):
         
     # new_ray = new_ray.T
     print("new_ray shape: ",new_ray.shape)
-    print("new_ray: ")
-    for i in range(0,10):
-        print("idx: ",i,"xyz:",new_ray[i,0:3],"dir:",new_ray[i,3:6])
+    # print("new_ray: ")
+    # for i in range(0,10):
+    #     print("idx: ",i,"xyz:",new_ray[i,0:3],"dir:",new_ray[i,3:6])
 
-    for i in range(0,10):
-        print("idx: ",i,"xyz:",rays[0:3,i],"dir:",rays[3:6,i])
+    # for i in range(0,10):
+    #     print("idx: ",i,"xyz:",rays[0:3,i],"dir:",rays[3:6,i])
 
     new_ray = new_ray.T
-    print("new_ray shape: ",new_ray.shape)
-    print("new_ray x:",new_ray[0,:10])
-    print("new_ray y:",new_ray[1,:10])
-    print("new_ray z:",new_ray[2,:10])
-    print("new_ray dx:",new_ray[3,:10])
-    print("new_ray dy:",new_ray[4,:10])
-    print("new_ray dz:",new_ray[5,:10])
+    # print("new_ray shape: ",new_ray.shape)
+    # print("new_ray x:",new_ray[0,:10])
+    # print("new_ray y:",new_ray[1,:10])
+    # print("new_ray z:",new_ray[2,:10])
+    # print("new_ray dx:",new_ray[3,:10])
+    # print("new_ray dy:",new_ray[4,:10])
+    # print("new_ray dz:",new_ray[5,:10])
 
     # stage4 compute color
     ret_color = np.zeros((rays.shape[1],3),dtype=np.float32)
     for i in range(0,reduce_ret.shape[0]):
         ret_color[i] = spheres[7:10,int(reduce_ret[i,1])]
+    
+    print("ret_color shape: ",ret_color.shape)
+    print("diffuse colorX")
+    for i in range(0,64,8):
+        print(ret_color[i:i+8,0])
+    print("diffuse colorY")
+    for i in range(0,64,8):
+        print(ret_color[i:i+8,1])
+    print("diffuse colorZ")
+    for i in range(0,64,8):
+        print(ret_color[i:i+8,2])
+    
+    
 
 
     ret_color = ret_color.T

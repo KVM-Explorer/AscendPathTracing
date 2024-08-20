@@ -25,13 +25,13 @@ class KernelRender {
 
         InitRaySoA(inputRays, r, block_offset, BLOCK_LENGTH);
         InitColorSoA(resultColor, output, block_offset, BLOCK_LENGTH);
-        inputSpheres.SetGlobalBuffer((__gm__ Float *)spheres, SPHERE_NUM * SPHERE_MEMBER_NUM);
+        inputSpheres.SetGlobalBuffer((__gm__ Float *)spheres, 512 / sizeof(Float));
 
-        pipe.InitBuffer(rayQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 6);         // ray xyz dxdydz = 6
-        pipe.InitBuffer(colorQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 3);       // color xyz = 3
-        pipe.InitBuffer(sphereQueue, 1, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
+        pipe.InitBuffer(rayQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 6);   // ray xyz dxdydz = 6
+        pipe.InitBuffer(colorQueue, BUFFER_NUM, GENERIC_SIZE * sizeof(Float) * 3); // color xyz = 3
+        pipe.InitBuffer(sphereQueue, 1, 512);                                      // num * bytes size * member num
 
-        pipe.InitBuffer(sphereBuf, SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM); // num * bytes size * member num
+        pipe.InitBuffer(sphereBuf, Round256(SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM)); // num * bytes size * member num
 
         pipe.InitBuffer(tmpBuf, GENERIC_SIZE * sizeof(Float) * (SPHERE_NUM + 20 + 20));
         pipe.InitBuffer(tmpIndexBuf, SPHERE_NUM * sizeof(uint32_t));
@@ -39,10 +39,10 @@ class KernelRender {
 
     __aicore__ inline void Process() {
 #ifdef __CCE_KT_TEST__
-        if (GetBlockIdx() == 0) {
-            printf("core %ld\n", GetBlockIdx());
-            auto ch = getchar();
-        }
+        // if (GetBlockIdx() == 0) {
+        //     printf("core %ld\n", GetBlockIdx());
+        //     auto ch = getchar();
+        // }
 #endif
         DataFormatCheck();
         InitAllocator();
@@ -78,7 +78,7 @@ class KernelRender {
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
         sphereData = sphereBuf.Get<Float>();
-        DataCopy(sphereData, inputSpheres, SPHERE_NUM * 10);
+        DataCopy(sphereData, inputSpheres, 512 / sizeof(Float));
     }
 
     // system mem -> device memory
@@ -113,9 +113,9 @@ class KernelRender {
         auto retBuffer = AllocDecorator(allocator.Alloc(GENERIC_SIZE * 3));
         VecLocalSoA ret;
         ret.Init(retBuffer.Get(), GENERIC_SIZE);
-        Duplicate(ret.x,Float(1.0),GENERIC_SIZE);
-        Duplicate(ret.y,Float(1.0),GENERIC_SIZE);
-        Duplicate(ret.z,Float(1.0),GENERIC_SIZE);
+        Duplicate(ret.x, Float(1.0), GENERIC_SIZE);
+        Duplicate(ret.y, Float(1.0), GENERIC_SIZE);
+        Duplicate(ret.z, Float(1.0), GENERIC_SIZE);
 
         auto retMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
@@ -127,6 +127,9 @@ class KernelRender {
 
         VecLocalSoA colors;
         colors.Init(color, GENERIC_SIZE);
+        Duplicate(colors.x, Float(0), GENERIC_SIZE);
+        Duplicate(colors.y, Float(0), GENERIC_SIZE);
+        Duplicate(colors.z, Float(0), GENERIC_SIZE);
 
         SphereLocalSoA spheres;
         spheres.Init(sphereData);
@@ -185,20 +188,21 @@ class KernelRender {
         // Step6: compute final color
 
         // Step7: write to device queue
-        // for (int i = 0; i < GENERIC_SIZE; i++) {
-        //     colors.x[i] = ret.x[i];
-        //     colors.y[i] = ret.y[i];
-        //     colors.z[i] = ret.z[i];
-        // }
-  
 
-        Muls(colors.x, ret.x, Float(1), GENERIC_SIZE);
-        Muls(colors.y, ret.y, Float(1), GENERIC_SIZE);
-        Muls(colors.z, ret.z, Float(1), GENERIC_SIZE);
+        if (cnt == 0) {
+            Duplicate(colors.x, Float(0.5), GENERIC_SIZE);
+            Duplicate(colors.y, Float(0.5), GENERIC_SIZE);
+            Duplicate(colors.z, Float(0.5), GENERIC_SIZE);
+        } else {
+            Adds(colors.x, ret.x, Float(0), GENERIC_SIZE);
+            Adds(colors.y, ret.y, Float(0), GENERIC_SIZE);
+            Adds(colors.z, ret.z, Float(0), GENERIC_SIZE);
+        }
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
         cnt++;
+        // DEBUG({ printf("==============================\n"); })
     }
 
     // write device queue to system mem
