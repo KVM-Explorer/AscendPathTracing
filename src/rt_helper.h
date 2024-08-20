@@ -42,7 +42,7 @@ inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tens
 }
 
 #define DEBUG(content)                                                                                                                               \
-    if (AscendC::GetBlockIdx() == 0) {                                                                                                               \
+    if (AscendC::GetBlockIdx() == 5) {                                                                                                               \
         content                                                                                                                                      \
     }
 
@@ -311,6 +311,9 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto tmpZ4 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto tmpSphereZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto testIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto smallIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ5 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ6 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
     // for (int i = 0; i < GENERIC_SIZE; i++) {
     //     testIndex.Get().ReinterpretCast<uint32_t>().SetValue(i, uint32_t(i % SPHERE_NUM * sizeof(Float)));
@@ -344,13 +347,10 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
         // if(i/SPHERE_NUM == 0) val =16;
         // else if(i/SPHERE_NUM == 7) val = 20;
         // else val = 0;
-        if(i/SPHERE_NUM==7){
-            if(i%3 ==0) val = 16;
-            else val = 20;
-        } 
-        else {
-            val = i %SPHERE_NUM * sizeof(Float);
-        }
+        int cnt = i / SPHERE_NUM % 2 ==0 ? i % SPHERE_NUM : SPHERE_NUM - i % SPHERE_NUM - 1;
+        if(cnt>0) val = cnt % 2 ==0 ? cnt-- : cnt;
+        val = cnt* sizeof(Float);
+
         testIndex.Get().ReinterpretCast<uint32_t>().SetValue(i,val);
     }
 
@@ -361,6 +361,9 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     Duplicate(tmpZ2.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(tmpZ3.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(tmpZ4.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ5.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ6.Get(), Float(-1), GENERIC_SIZE);
+    
 
     Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
@@ -372,19 +375,36 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     Gather(tmpZ4.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereZ.Get(), tmpSphereZ.Get(), testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
+    auto test = tmpSphereZ.Get().GetValue(2);
+    DEBUG({
+        printf("test %f\n",test);
+    })
+    for(int i=0;i<GENERIC_SIZE;i++)
+    {
+        auto idx = hitIndex.ReinterpretCast<int32_t>().GetValue(i);
+        auto val =tmpSphereZ.Get().GetValue(idx);
+        
+        // tmpZ5.Get().SetValue(i,val);
+        DEBUG({
+            printf("idx %d val %f\n",idx,val);
+        })
+    }
+
+    
 
     DEBUG({
         CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
         CPUDumpTensorU("offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
         CPUDumpTensorU("testIndex", testIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
-        CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
-        CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
+        // CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
+        // CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
         CPUDumpTensor("STD sphereZ", spheres.z, SPHERE_NUM);
         CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM); 
         CPUDumpTensor("cur output tmpZ1", tmpZ1.Get(), GENERIC_SIZE);  // Exception 安装Index正确读取数据
         CPUDumpTensor("cur output tmpZ2", tmpZ2.Get(), GENERIC_SIZE); //  UnExpected 重复同样的值，读取的数据不对
         CPUDumpTensor("cur output tmpZ3", tmpZ3.Get(), GENERIC_SIZE); //  UnExpected 输出受限
         CPUDumpTensor("cur output tmpZ4", tmpZ4.Get(), GENERIC_SIZE); //  UnExpected 输出受限
+        CPUDumpTensor("cur output tmpZ5", tmpZ5.Get(), GENERIC_SIZE); //  UnExpected 输出受限
         CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE); // Excepted
 
         // CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE);
@@ -454,6 +474,7 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto normalLen = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto normalLenSq = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(normalLenSq.Get(), Float(0), GENERIC_SIZE);
+    
 
     MulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), GENERIC_SIZE);
     MulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), GENERIC_SIZE);
