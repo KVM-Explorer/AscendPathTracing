@@ -508,7 +508,7 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     CPUDumpTensor("diffuseZ", diffuseZ.Get(), GENERIC_SIZE);
     // })
 
-    Mul(ret.x, ret.x, diffuseX.Get(), GENERIC_SIZE); // FIXME: 禁止使用存在Emission的Sphere更新颜色
-    Mul(ret.y, ret.y, diffuseY.Get(), GENERIC_SIZE);
-    Mul(ret.z, ret.z, diffuseZ.Get(), GENERIC_SIZE);
+    Adds(ret.x,diffuseX.Get(),Float(0),GENERIC_SIZE);
+    Adds(ret.y,diffuseY.Get(),Float(0),GENERIC_SIZE);
+    Adds(ret.z,diffuseZ.Get(),Float(0),GENERIC_SIZE);
 }

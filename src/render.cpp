@@ -189,20 +189,20 @@ class KernelRender {
 
         // Step7: write to device queue
 
-        if (cnt == 0) {
-            Duplicate(colors.x, Float(0.5), GENERIC_SIZE);
-            Duplicate(colors.y, Float(0.5), GENERIC_SIZE);
-            Duplicate(colors.z, Float(0.5), GENERIC_SIZE);
-        } else {
-            Adds(colors.x, ret.x, Float(0), GENERIC_SIZE);
-            Adds(colors.y, ret.y, Float(0), GENERIC_SIZE);
-            Adds(colors.z, ret.z, Float(0), GENERIC_SIZE);
-        }
+        Adds(colors.x, ret.x, Float(0), GENERIC_SIZE);
+        Adds(colors.y, ret.y, Float(0), GENERIC_SIZE);
+        Adds(colors.z, ret.z, Float(0), GENERIC_SIZE);
+
+        // DEBUG({
+        //     CPUDumpTensor("Color x", colors.x, GENERIC_SIZE);
+        //     CPUDumpTensor("Color y", colors.y, GENERIC_SIZE);
+        //     CPUDumpTensor("Color z", colors.z, GENERIC_SIZE);
+        // })
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
         cnt++;
-        // DEBUG({ printf("==============================\n"); })
+        // DEBUG({ printf("===========cnt: %d===================\n", cnt); })
     }
 
     // write device queue to system mem
