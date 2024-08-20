@@ -106,6 +106,14 @@ def gen_spheres():
     # print("sphere shape:",spheres.shape)
     # print(spheres)
     spheres.astype(np.float32).tofile("./input/spheres.bin")
+    # binary_spheres = spheres
+    # # 末尾填充0 保证是512B的倍数
+    # if spheres.shape[1] % 32 != 0:
+    #     pad_len = 32 - spheres.shape[1] % 32
+    #     spheres = np.concatenate([spheres, np.zeros((10, pad_len), dtype=np.float32)], axis=1)
+    # print("sphere shape:",spheres.shape)
+
+    
     return spheres.T
 
 def test_scene(rays, spheres):
@@ -284,6 +292,15 @@ def test_soa(rays,spheres):
 
     for i in range(0,10):
         print("idx: ",i,"xyz:",rays[0:3,i],"dir:",rays[3:6,i])
+
+    new_ray = new_ray.T
+    print("new_ray shape: ",new_ray.shape)
+    print("new_ray x:",new_ray[0,:10])
+    print("new_ray y:",new_ray[1,:10])
+    print("new_ray z:",new_ray[2,:10])
+    print("new_ray dx:",new_ray[3,:10])
+    print("new_ray dy:",new_ray[4,:10])
+    print("new_ray dz:",new_ray[5,:10])
 
     # stage4 compute color
     ret_color = np.zeros((rays.shape[1],3),dtype=np.float32)

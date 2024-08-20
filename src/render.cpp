@@ -39,10 +39,10 @@ class KernelRender {
 
     __aicore__ inline void Process() {
 #ifdef __CCE_KT_TEST__
-        // if (GetBlockIdx() == 0) {
-        //     printf("core %ld\n", GetBlockIdx());
-        //     auto ch = getchar();
-        // }
+        if (GetBlockIdx() == 0) {
+            printf("core %ld\n", GetBlockIdx());
+            auto ch = getchar();
+        }
 #endif
         DataFormatCheck();
         InitAllocator();
@@ -190,14 +190,7 @@ class KernelRender {
         //     colors.y[i] = ret.y[i];
         //     colors.z[i] = ret.z[i];
         // }
-
-        DEBUG(
-            if (cnt == 0) {
-                CPUDumpTensor("Final color x", ret.x, GENERIC_SIZE);
-                CPUDumpTensor("Final color y", ret.y, GENERIC_SIZE);
-                CPUDumpTensor("Final color z", ret.z, GENERIC_SIZE);
-            }
-        )
+  
 
         Muls(colors.x, ret.x, Float(1), GENERIC_SIZE);
         Muls(colors.y, ret.y, Float(1), GENERIC_SIZE);

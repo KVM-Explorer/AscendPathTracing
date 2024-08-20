@@ -26,9 +26,11 @@ template <typename T> inline void CPUDumpTensor(const char *name, const AscendC:
     }
     printf("\n");
 }
-template <typename T> inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
+template <typename T>
+inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool issign, bool ismask = false) {
     printf("%s: \n\t", name);
-    auto format_str = "%d ";
+
+    auto format_str = issign ? "%d " : "%u ";
     if (ismask)
         format_str = "%08b ";
     for (int i = 0; i < count; i++) {
@@ -50,6 +52,17 @@ template <typename T> inline std::uint32_t GetWorkspaceLength(int data_num, bool
     // TODO: 请根据实际情况修改
     return -1;
 }
+
+/*
+ * @brief 计算存储空间并上取整到256B
+ */
+__aicore__ inline uint32_t Round256(uint32_t length) { return (length + 255) & (~255); }
+
+/*
+ * @brief 计算存储空间并上取整到32B
+ */
+__aicore__ inline uint32_t Round32(uint32_t length) { return (length + 31) & (~31); }
+
 struct RaySoA {
     AscendC::GlobalTensor<Float> ox, oy, oz;
     AscendC::GlobalTensor<Float> dx, dy, dz;
@@ -71,11 +84,13 @@ struct RayLocalSoA {
 };
 
 struct SphereLocalSoA {
+    AscendC::LocalTensor<Float> base;
     AscendC::LocalTensor<Float> r2, x, y, z;
     AscendC::LocalTensor<Float> emissionX, emissionY, emissionZ;
     AscendC::LocalTensor<Float> colorX, colorY, colorZ;
     __aicore__ inline SphereLocalSoA() {}
     __aicore__ inline void Init(AscendC::LocalTensor<Float> data) {
+        base = data;
         r2 = data[SPHERE_NUM * 0];
         x = data[SPHERE_NUM * 1];
         y = data[SPHERE_NUM * 2];
@@ -252,20 +267,20 @@ __aicore__ inline void ReduceMinInfo(AscendC::LocalTensor<Float> &minIndex, Asce
         }
     }
 
-    DEBUG({
-        printf("Debug::RecudeInfo sphereIndex\n");
-        CPUDumpTensorU("sphereIndex", sphereIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE * SPHERE_NUM);
-    })
+    // DEBUG({
+    //     printf("Debug::RecudeInfo sphereIndex\n");
+    //     CPUDumpTensorU("sphereIndex", sphereIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE * SPHERE_NUM);
+    // })
 
     auto gatherMaskParam = GatherMaskParams{0, 8, 0, 8};
     uint64_t gatherCount = 0;
     GatherMask(minIndex.ReinterpretCast<uint32_t>(), sphereIndex.Get().ReinterpretCast<uint32_t>(), rawIndex.Get().ReinterpretCast<uint32_t>(), false,
                0, gatherMaskParam, gatherCount);
 
-    DEBUG({
-        printf("Debug::RecudeInfo minIndex\n");
-        CPUDumpTensorU("minIndex", minIndex.ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    })
+    // DEBUG({
+    //     printf("Debug::RecudeInfo minIndex\n");
+    //     CPUDumpTensorU("minIndex", minIndex.ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    // })
 
     // printf("Gather GENERIC_SIZE %ld\n", gatherCount);
 }
@@ -290,6 +305,20 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto sphereX = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto sphereY = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto sphereZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ1 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ2 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ3 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpZ4 = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmpSphereZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto testIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+
+    // for (int i = 0; i < GENERIC_SIZE; i++) {
+    //     testIndex.Get().ReinterpretCast<uint32_t>().SetValue(i, uint32_t(i % SPHERE_NUM * sizeof(Float)));
+    // }
+
+    for (int i = 0; i < SPHERE_NUM; i++) {
+        tmpSphereZ.Get().SetValue(i, spheres.z.GetValue(i));
+    }
 
     // Muls 不支持uint32_t类型的dst和src | 支持 half/float/int16_t/int32_t
     // auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -305,25 +334,112 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
-    DEBUG({
-        printf("Debug::GenerateNewRays srcOffsetLocal\n");
-        CPUDumpTensorU("srcOffsetLocal", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    })
+    // DEBUG({
+    //     printf("Debug::GenerateNewRays srcOffsetLocal\n");
+    //     CPUDumpTensorU("srcOffsetLocal", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    // })
+    for(int i=0;i<GENERIC_SIZE;i++){
+        // Error 无法从offset中正确的读取数据
+        uint32_t val;
+        // if(i/SPHERE_NUM == 0) val =16;
+        // else if(i/SPHERE_NUM == 7) val = 20;
+        // else val = 0;
+        if(i/SPHERE_NUM==7){
+            if(i%3 ==0) val = 16;
+            else val = 20;
+        } 
+        else {
+            val = i %SPHERE_NUM * sizeof(Float);
+        }
+        testIndex.Get().ReinterpretCast<uint32_t>().SetValue(i,val);
+    }
 
-    Duplicate(sphereX.Get(), Float(0), GENERIC_SIZE);
-    Duplicate(sphereY.Get(), Float(0), GENERIC_SIZE);
-    Duplicate(sphereZ.Get(), Float(0), GENERIC_SIZE);
+    Duplicate(sphereX.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(sphereY.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(sphereZ.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ1.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ2.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ3.Get(), Float(-1), GENERIC_SIZE);
+    Duplicate(tmpZ4.Get(), Float(-1), GENERIC_SIZE);
 
-    Gather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
+
+    Gather(tmpZ1.Get(), tmpSphereZ.Get(), testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    Gather(tmpZ2.Get(), tmpSphereZ.Get(), srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    Gather(tmpZ3.Get(), spheres.z, testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    Gather(tmpZ4.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    Gather(sphereZ.Get(), tmpSphereZ.Get(), testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+
+
     DEBUG({
-        printf("Debug::GenerateNewRays\n");
-        CPUDumpTensorU("src local offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-        CPUDumpTensor("sphere z raw", spheres.z, 8);
-        CPUDumpTensor("sphereZ", sphereZ.Get(), GENERIC_SIZE);
+        CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
+        CPUDumpTensorU("offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
+        CPUDumpTensorU("testIndex", testIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
+        CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
+        CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
+        CPUDumpTensor("STD sphereZ", spheres.z, SPHERE_NUM);
+        CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM); 
+        CPUDumpTensor("cur output tmpZ1", tmpZ1.Get(), GENERIC_SIZE);  // Exception 安装Index正确读取数据
+        CPUDumpTensor("cur output tmpZ2", tmpZ2.Get(), GENERIC_SIZE); //  UnExpected 重复同样的值，读取的数据不对
+        CPUDumpTensor("cur output tmpZ3", tmpZ3.Get(), GENERIC_SIZE); //  UnExpected 输出受限
+        CPUDumpTensor("cur output tmpZ4", tmpZ4.Get(), GENERIC_SIZE); //  UnExpected 输出受限
+        CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE); // Excepted
+
+        // CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE);
+        // printf("targetIndex\n\t");
+        // for (int j = 0; j < GENERIC_SIZE; j++) {
+        //     auto val = hitIndex.ReinterpretCast<int32_t>().GetValue(j);
+        //     printf("%d ", val);
+        //     if (j % 8 == 7) {
+        //         printf("\n\t");
+        //     }
+        // }
+        // printf("\n");
+        // printf("sphereZ by minVal index Directly(Error)\n\t");
+        // for (int j = 0; j < GENERIC_SIZE; j++) {
+        //     auto val = spheres.z.GetValue(hitIndex.ReinterpretCast<int32_t>().GetValue(j));
+        //     printf("%5.3f ", val);
+        //     if (j % 8 == 7) {
+        //         printf("\n\t");
+        //     }
+        // }
+        // printf("\n");
+        // printf("sphereZ one by one(right)\n\t");
+        // for (int j = 0; j < GENERIC_SIZE; j++) {
+        //     auto val = spheres.z.GetValue(j % SPHERE_NUM); // correct
+        //     printf("%5.3f ", val);
+        //     if (j % 8 == 7) {
+        //         printf("\n\t");
+        //     }
+        // }
+        // printf("\n");
+        // printf("sphereZ by convert index(Error)\n\t");
+
+        // for (int j = 0; j < GENERIC_SIZE; j++) {
+        //     auto val = spheres.z.GetValue(testIndex.Get().ReinterpretCast<uint32_t>().GetValue(j));
+        //     printf("%5.3f ", val);
+        //     if (j % 8 == 7) {
+        //         printf("\n\t");
+        //     }
+        // }
+        // printf("\n");
     })
+    // FIXME: 直接使用spheres.z会因为数据未知的原因导致无法读取部分数据(目前只知道和spheres.z有关),使用基于原始基地址的Base也无法解决问题
+
+    // DEBUG({
+    //     printf("Debug::GenerateNewRays\n");
+    //     CPUDumpTensorU("src local offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    //     // printf("sphere base addr %ld\n", (int64_t)spheres.base.GetPhyAddr());
+    //     // printf("sphere x addr %ld\n", (int64_t)spheres.x.GetPhyAddr());
+    //     // printf("sphere y addr %ld\n", (int64_t)spheres.y.GetPhyAddr());
+    //     // printf("sphere z addr %ld\n", (int64_t)spheres.z.GetPhyAddr());
+    //     CPUDumpTensor("sphere z raw", spheres.z, 8);
+    //     CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
+    //     CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
+    //     CPUDumpTensor("sphereZ", sphereZ.Get(), GENERIC_SIZE);
+    // })
 
     auto normalX = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto normalY = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -394,11 +510,11 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     auto diffuseY = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto diffuseZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
-    DEBUG({
-        auto diffuse = diffuseX.Get().GetSize();
-        printf("Debug::AccumulateIntervalColor\n");
-        printf("diffuseX size %d\n", diffuse);
-    })
+    // DEBUG({
+    //     auto diffuse = diffuseX.Get().GetSize();
+    //     printf("Debug::AccumulateIntervalColor\n");
+    //     printf("diffuseX size %d\n", diffuse);
+    // })
 
     auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
@@ -409,14 +525,14 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(diffuseZ.Get(), spheres.colorZ, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
-    DEBUG({
-        printf("Debug::AccumulateIntervalColor\n");
-        auto srcOffsetSize = srcOffsetLocal.Get().GetSize();
-        printf("srcOffsetSize %d\n", srcOffsetSize);
-        CPUDumpTensor("sphere ColorX", spheres.colorX, SPHERE_NUM);
-        CPUDumpTensorU("srcOffsetLocal", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-        CPUDumpTensor("diffuseX", diffuseX.Get(), GENERIC_SIZE);
-    })
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor\n");
+    //     auto srcOffsetSize = srcOffsetLocal.Get().GetSize();
+    //     printf("srcOffsetSize %d\n", srcOffsetSize);
+    //     CPUDumpTensor("sphere ColorX", spheres.colorX, SPHERE_NUM);
+    //     CPUDumpTensorU("srcOffsetLocal", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    //     CPUDumpTensor("diffuseX", diffuseX.Get(), GENERIC_SIZE);
+    // })
 
     Mul(ret.x, ret.x, diffuseX.Get(), GENERIC_SIZE); // FIXME: 禁止使用存在Emission的Sphere更新颜色
     Mul(ret.y, ret.y, diffuseY.Get(), GENERIC_SIZE);
