@@ -42,7 +42,7 @@ inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tens
 }
 
 #define DEBUG(content)                                                                                                                               \
-    if (AscendC::GetBlockIdx() == 5) {                                                                                                               \
+    if (AscendC::GetBlockIdx() == 0) {                                                                                                               \
         content                                                                                                                                      \
     }
 
@@ -337,115 +337,68 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
-    // DEBUG({
-    //     printf("Debug::GenerateNewRays srcOffsetLocal\n");
-    //     CPUDumpTensorU("srcOffsetLocal", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    // })
-    for(int i=0;i<GENERIC_SIZE;i++){
-        // Error 无法从offset中正确的读取数据
-        uint32_t val;
-        // if(i/SPHERE_NUM == 0) val =16;
-        // else if(i/SPHERE_NUM == 7) val = 20;
-        // else val = 0;
-        int cnt = i / SPHERE_NUM % 2 ==0 ? i % SPHERE_NUM : SPHERE_NUM - i % SPHERE_NUM - 1;
-        if(cnt>0) val = cnt % 2 ==0 ? cnt-- : cnt;
-        val = cnt* sizeof(Float);
-
-        testIndex.Get().ReinterpretCast<uint32_t>().SetValue(i,val);
-    }
 
     Duplicate(sphereX.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereY.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereZ.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ1.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ2.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ3.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ4.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ5.Get(), Float(-1), GENERIC_SIZE);
-    Duplicate(tmpZ6.Get(), Float(-1), GENERIC_SIZE);
     
 
     Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
-
-    Gather(tmpZ1.Get(), tmpSphereZ.Get(), testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(tmpZ2.Get(), tmpSphereZ.Get(), srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(tmpZ3.Get(), spheres.z, testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(tmpZ4.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(sphereZ.Get(), tmpSphereZ.Get(), testIndex.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-
-    auto test = tmpSphereZ.Get().GetValue(2);
-    DEBUG({
-        printf("test %f\n",test);
-    })
-    for(int i=0;i<GENERIC_SIZE;i++)
-    {
-        auto idx = hitIndex.ReinterpretCast<int32_t>().GetValue(i);
-        auto val =tmpSphereZ.Get().GetValue(idx);
-        
-        // tmpZ5.Get().SetValue(i,val);
-        DEBUG({
-            printf("idx %d val %f\n",idx,val);
-        })
-    }
+    Gather(sphereZ.Get(), tmpSphereZ.Get(), srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
     
 
-    DEBUG({
-        CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
-        CPUDumpTensorU("offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
-        CPUDumpTensorU("testIndex", testIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
-        // CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
-        // CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
-        CPUDumpTensor("STD sphereZ", spheres.z, SPHERE_NUM);
-        CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM); 
-        CPUDumpTensor("cur output tmpZ1", tmpZ1.Get(), GENERIC_SIZE);  // Exception 安装Index正确读取数据
-        CPUDumpTensor("cur output tmpZ2", tmpZ2.Get(), GENERIC_SIZE); //  UnExpected 重复同样的值，读取的数据不对
-        CPUDumpTensor("cur output tmpZ3", tmpZ3.Get(), GENERIC_SIZE); //  UnExpected 输出受限
-        CPUDumpTensor("cur output tmpZ4", tmpZ4.Get(), GENERIC_SIZE); //  UnExpected 输出受限
-        CPUDumpTensor("cur output tmpZ5", tmpZ5.Get(), GENERIC_SIZE); //  UnExpected 输出受限
-        CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE); // Excepted
+    // DEBUG({
+    //     CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
+    //     CPUDumpTensorU("offset", srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
+    //     CPUDumpTensorU("testIndex", testIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE, false);
+    //     // CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
+    //     // CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
+    //     CPUDumpTensor("STD sphereZ", spheres.z, SPHERE_NUM);
+    //     CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM); 
+    //     CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE); // Excepted
 
-        // CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE);
-        // printf("targetIndex\n\t");
-        // for (int j = 0; j < GENERIC_SIZE; j++) {
-        //     auto val = hitIndex.ReinterpretCast<int32_t>().GetValue(j);
-        //     printf("%d ", val);
-        //     if (j % 8 == 7) {
-        //         printf("\n\t");
-        //     }
-        // }
-        // printf("\n");
-        // printf("sphereZ by minVal index Directly(Error)\n\t");
-        // for (int j = 0; j < GENERIC_SIZE; j++) {
-        //     auto val = spheres.z.GetValue(hitIndex.ReinterpretCast<int32_t>().GetValue(j));
-        //     printf("%5.3f ", val);
-        //     if (j % 8 == 7) {
-        //         printf("\n\t");
-        //     }
-        // }
-        // printf("\n");
-        // printf("sphereZ one by one(right)\n\t");
-        // for (int j = 0; j < GENERIC_SIZE; j++) {
-        //     auto val = spheres.z.GetValue(j % SPHERE_NUM); // correct
-        //     printf("%5.3f ", val);
-        //     if (j % 8 == 7) {
-        //         printf("\n\t");
-        //     }
-        // }
-        // printf("\n");
-        // printf("sphereZ by convert index(Error)\n\t");
+    //     // CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE);
+    //     // printf("targetIndex\n\t");
+    //     // for (int j = 0; j < GENERIC_SIZE; j++) {
+    //     //     auto val = hitIndex.ReinterpretCast<int32_t>().GetValue(j);
+    //     //     printf("%d ", val);
+    //     //     if (j % 8 == 7) {
+    //     //         printf("\n\t");
+    //     //     }
+    //     // }
+    //     // printf("\n");
+    //     // printf("sphereZ by minVal index Directly(Error)\n\t");
+    //     // for (int j = 0; j < GENERIC_SIZE; j++) {
+    //     //     auto val = spheres.z.GetValue(hitIndex.ReinterpretCast<int32_t>().GetValue(j));
+    //     //     printf("%5.3f ", val);
+    //     //     if (j % 8 == 7) {
+    //     //         printf("\n\t");
+    //     //     }
+    //     // }
+    //     // printf("\n");
+    //     // printf("sphereZ one by one(right)\n\t");
+    //     // for (int j = 0; j < GENERIC_SIZE; j++) {
+    //     //     auto val = spheres.z.GetValue(j % SPHERE_NUM); // correct
+    //     //     printf("%5.3f ", val);
+    //     //     if (j % 8 == 7) {
+    //     //         printf("\n\t");
+    //     //     }
+    //     // }
+    //     // printf("\n");
+    //     // printf("sphereZ by convert index(Error)\n\t");
 
-        // for (int j = 0; j < GENERIC_SIZE; j++) {
-        //     auto val = spheres.z.GetValue(testIndex.Get().ReinterpretCast<uint32_t>().GetValue(j));
-        //     printf("%5.3f ", val);
-        //     if (j % 8 == 7) {
-        //         printf("\n\t");
-        //     }
-        // }
-        // printf("\n");
-    })
+    //     // for (int j = 0; j < GENERIC_SIZE; j++) {
+    //     //     auto val = spheres.z.GetValue(testIndex.Get().ReinterpretCast<uint32_t>().GetValue(j));
+    //     //     printf("%5.3f ", val);
+    //     //     if (j % 8 == 7) {
+    //     //         printf("\n\t");
+    //     //     }
+    //     // }
+    //     // printf("\n");
+    // })
     // FIXME: 直接使用spheres.z会因为数据未知的原因导致无法读取部分数据(目前只知道和spheres.z有关),使用基于原始基地址的Base也无法解决问题
 
     // DEBUG({
