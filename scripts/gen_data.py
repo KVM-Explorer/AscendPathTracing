@@ -83,12 +83,12 @@ Sphere spheres[] = {//Scene: radius, position, emission, color, material
 
 def gen_spheres():
     spheres = np.array([],dtype=np.float32) # 8 spheres
-    spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.75, 0.25, 0.25])  # radius, x, y, z, emission xyz, color xyz
-    spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.25, 0.25, 0.75])
-    spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.75, 0.75, 0.75])
+    spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.435, 0.376, 0.667])  # radius, x, y, z, emission xyz, color xyz
+    spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.667, 0.129, 0.086])
+    spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.270, 0.725, 0.486])
     spheres = np.append(spheres, [1e5, 50, 40.8, -1e5+170,   0,0, 0,   0, 0, 0])
-    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,   0.75, 0.75, 0.75])
-    spheres = np.append(spheres, [1e5, 50, -1e5+81.6, 81.6,   0,0, 0,   0.75, 0.75, 0.75])
+    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,  1.0, 0.902, 0.00])
+    spheres = np.append(spheres, [1e5, 50, -1e5+81.6, 81.6,   0,0, 0,   0.141, 0.408, 0.635])
     spheres = np.append(spheres, [16.5, 27, 16.5, 47,   0,0, 0,   0.999, 0.999, 0.999])
     # spheres = np.append(spheres, [16.5, 73, 16.5, 78,   0,0, 0,   0.999, 0.999, 0.999])
     spheres = np.append(spheres, [600, 50, 681.6-0.27, 81.6,   12, 12, 12,   0, 0, 0])

@@ -33,7 +33,7 @@ class KernelRender {
 
         pipe.InitBuffer(sphereBuf, Round256(SPHERE_NUM * sizeof(Float) * SPHERE_MEMBER_NUM)); // num * bytes size * member num
 
-        pipe.InitBuffer(tmpBuf, GENERIC_SIZE * sizeof(Float) * (SPHERE_NUM + 20 + 20));
+        pipe.InitBuffer(tmpBuf, GENERIC_SIZE * sizeof(Float) * (GENERIC_SIZE));
         pipe.InitBuffer(tmpIndexBuf, SPHERE_NUM * sizeof(uint32_t));
     }
 
@@ -45,7 +45,6 @@ class KernelRender {
         // }
 #endif
         DataFormatCheck();
-        InitAllocator();
 
         constexpr int loop_count = TILING_NUM * BUFFER_NUM;
 
@@ -70,10 +69,7 @@ class KernelRender {
         ASSERT(BLOCK_LENGTH % GENERIC_SIZE == 0); // ,"Block length must be divisible by tiling length"
     }
 
-    __aicore__ inline void InitAllocator() {
-        LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
-        allocator.Init(tmpBuffer, GENERIC_SIZE * (SPHERE_NUM + 20 + 20));
-    }
+
 
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
@@ -110,6 +106,11 @@ class KernelRender {
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
 
+
+        Allocator allocator;
+        LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
+        allocator.Init(tmpBuffer, GENERIC_SIZE * (GENERIC_SIZE));
+
         auto retBuffer = AllocDecorator(allocator.Alloc(GENERIC_SIZE * 3));
         VecLocalSoA ret;
         ret.Init(retBuffer.Get(), GENERIC_SIZE);
@@ -118,9 +119,6 @@ class KernelRender {
         Duplicate(ret.z, Float(1.0), GENERIC_SIZE);
 
         auto retMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-
-        auto stage1val = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
-        auto stage1Trans = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
 
         RayLocalSoA rays;
         rays.Init(ray, GENERIC_SIZE);
@@ -134,56 +132,48 @@ class KernelRender {
         SphereLocalSoA spheres;
         spheres.Init(sphereData);
 
-        int32_t cnt = 0;
-
-        // Step1: compute ray-sphere intersection
-        for (int i = 0; i < SPHERE_NUM; i++) {
-            int offset = i * GENERIC_SIZE;
-            // clang-format off
-            auto cur_sphere =Sphere{
-                .r2 = spheres.r2.GetValue(i), 
-                .x = spheres.x.GetValue(i), 
-                .y = spheres.y.GetValue(i),
-                .z = spheres.z.GetValue(i)};
-            // clang-format on
-            auto dst = stage1val.Get()[offset];
-            SphereHitInfo(dst, allocator, cur_sphere, rays);
-        }
-
-        // Step2: ray num of hit sphere -> sphere num of hit ray
-        Transpose(stage1Trans.Get(), stage1val.Get(), allocator);
-        stage1val.Release();
-
-        // Step3: Compare & Get Min Index 8 float -> 32B = 1 block
-        auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-        auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-        ReduceMinInfo(hitIndex.Get(), hitMinT.Get(), stage1Trans.Get(), allocator);
-        stage1Trans.Release();
-
-        // DEBUG(
-        //     if (cnt == 0) {
-        //         CPUDumpTensorU("ReduceMin Index uint32_t",hitIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-        //         CPUDumpTensorU("ReduceMin Index int32_T",hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
-        //     }
-        // )
-
-        // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
-        GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator);
-
         // DEBUG({
-        //     if (cnt == 0)
-        //     {
-        //         CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
-        //         CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
-        //         CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
-        //         CPUDumpTensor("New ray dx", rays.dx, GENERIC_SIZE);
-        //         CPUDumpTensor("New ray dy", rays.dy, GENERIC_SIZE);
-        //         CPUDumpTensor("New ray dz", rays.dz, GENERIC_SIZE);
-        //     }
+        //     printf("retBuffer\n");
+        //     CPUDumpTensor("retBuffer", retBuffer.Get(), GENERIC_SIZE * 3);
         // })
 
-        // Step5: compute diffuse color & mask
-        AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator);
+        int32_t cnt = 0;
+        int bound = 0;
+        while (bound < 1) {
+            
+
+            // Step1: compute ray-sphere intersection
+            auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+            auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+
+            ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator);
+
+            // DEBUG(
+            //     if (cnt == 0) {
+            //         CPUDumpTensorU("ReduceMin Index uint32_t",hitIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+            //         CPUDumpTensorU("ReduceMin Index int32_T",hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
+            //     }
+            // )
+
+            // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
+            GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator);
+
+            // DEBUG({
+            //     if (cnt == 0)
+            //     {
+            //         CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
+            //         CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
+            //         CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
+            //         CPUDumpTensor("New ray dx", rays.dx, GENERIC_SIZE);
+            //         CPUDumpTensor("New ray dy", rays.dy, GENERIC_SIZE);
+            //         CPUDumpTensor("New ray dz", rays.dz, GENERIC_SIZE);
+            //     }
+            // })
+
+            // Step5: compute diffuse color & mask
+            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator);
+            bound++;
+        }
 
         // Step6: compute final color
 
@@ -227,7 +217,6 @@ class KernelRender {
     int samples;
 
     // tmp memory allocator
-    Allocator allocator;
 
     // global
     RaySoA inputRays;

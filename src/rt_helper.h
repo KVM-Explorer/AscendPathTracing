@@ -26,8 +26,7 @@ template <typename T> inline void CPUDumpTensor(const char *name, const AscendC:
     }
     printf("\n");
 }
-template <typename T>
-inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
+template <typename T> inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
     printf("%s: \n\t", name);
 
     auto format_str = "%d ";
@@ -285,6 +284,32 @@ __aicore__ inline void ReduceMinInfo(AscendC::LocalTensor<Float> &minIndex, Asce
     // printf("Gather GENERIC_SIZE %ld\n", gatherCount);
 }
 
+__aicore__ inline void ComputeHitInfo(AscendC::LocalTensor<Float> &minT, AscendC::LocalTensor<Float> &minIdx, RayLocalSoA &rays,
+                                      SphereLocalSoA &spheres, Allocator &allocator) {
+    using namespace AscendC;
+    auto hitInfo = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
+    for (int i = 0; i < SPHERE_NUM; i++) {
+        int offset = i * GENERIC_SIZE;
+        // clang-format off
+            auto cur_sphere =Sphere{
+                .r2 = spheres.r2.GetValue(i), 
+                .x = spheres.x.GetValue(i), 
+                .y = spheres.y.GetValue(i),
+                .z = spheres.z.GetValue(i)};
+        // clang-format on
+        auto dst = hitInfo.Get()[offset];
+        SphereHitInfo(dst, allocator, cur_sphere, rays);
+    }
+
+    auto transpose = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
+
+    // Step2: ray num of hit sphere -> sphere num of hit ray
+    Transpose(transpose.Get(), hitInfo.Get(), allocator);
+
+    // Step3: Compare & Get Min Index 8 float -> 32B = 1 block
+    ReduceMinInfo(minIdx, minT, transpose.Get(), allocator);
+}
+
 __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<Float> &hitIndex, AscendC::LocalTensor<Float> &hitMinT,
                                        SphereLocalSoA &spheres, Allocator &allocator) {
     /// hitPos = rayPos + rayDir * hitMinT
@@ -337,17 +362,13 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
-
     Duplicate(sphereX.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereY.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereZ.Get(), Float(-1), GENERIC_SIZE);
-    
 
     Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-
-    
 
     // DEBUG({
     //     // CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
@@ -356,7 +377,7 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     //     // CPUDumpTensor("sphereX", sphereX.Get(), GENERIC_SIZE);
     //     // CPUDumpTensor("sphereY", sphereY.Get(), GENERIC_SIZE);
     //     // CPUDumpTensor("STD sphereZ", spheres.z, SPHERE_NUM);
-    //     // CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM); 
+    //     // CPUDumpTensor("tmpSphereZ", tmpSphereZ.Get(), SPHERE_NUM);
     //     CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE); // Excepted
 
     //     // CPUDumpTensor("cur output sphereZ", sphereZ.Get(), GENERIC_SIZE);
@@ -426,7 +447,6 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto normalLen = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto normalLenSq = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(normalLenSq.Get(), Float(0), GENERIC_SIZE);
-    
 
     MulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), GENERIC_SIZE);
     MulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), GENERIC_SIZE);
@@ -471,14 +491,7 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
                                                SphereLocalSoA &spheres, Allocator &allocator) {
     using namespace AscendC;
 
-    // 确定终止ray的mask
-    auto TerminateMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    CompareScalar(TerminateMask.Get(), hitIndex, Float(7), CMPMODE::EQ, GENERIC_SIZE); // FIXME: 更新数据类型
-
-    // 合并mask
-    // And(retMask, retMask, TerminateMask.Get(), GENERIC_SIZE/8); // TODO: 合并mask有bug
-
-    // 累加颜色
+    // 提取DiffuseColor
     auto diffuseX = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto diffuseY = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto diffuseZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -495,7 +508,6 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
         tmpDiffuseZ.Get().SetValue(i, spheres.colorZ.GetValue(i));
     }
 
-
     Gather(diffuseX.Get(), spheres.colorX, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     Gather(diffuseZ.Get(), tmpDiffuseZ.Get(), srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
@@ -508,7 +520,47 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     CPUDumpTensor("diffuseZ", diffuseZ.Get(), GENERIC_SIZE);
     // })
 
-    Adds(ret.x,diffuseX.Get(),Float(0),GENERIC_SIZE);
-    Adds(ret.y,diffuseY.Get(),Float(0),GENERIC_SIZE);
-    Adds(ret.z,diffuseZ.Get(),Float(0),GENERIC_SIZE);
+    // 确定终止ray的mask
+    // auto TerminateMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE / 8));
+    // CompareScalar(TerminateMask.Get().ReinterpretCast<uint8_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(7), CMPMODE::EQ, GENERIC_SIZE); //
+    // FIXME: 更新数据类型
+
+    // // 合并mask
+    // auto mask1 = TerminateMask.Get().ReinterpretCast<uint64_t>().GetValue(0);
+    // auto mask2 =retMask.ReinterpretCast<uint64_t>().GetValue(0);
+    // auto mask = mask1 & mask2;
+
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor\n");
+    //     CPUDumpTensorU("TerminateMask", TerminateMask.Get().ReinterpretCast<uint8_t>(), GENERIC_SIZE / 8, true);
+    //     CPUDumpTensorU("retMask", retMask.ReinterpretCast<uint8_t>(), GENERIC_SIZE / 8, true);
+    //     printf("mask1 %ld mask2 %ld mask %ld\n", mask1, mask2, mask);
+    // })
+
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor\n");
+    //     CPUDumpTensor("ret all", ret.x, GENERIC_SIZE*3);
+    //     CPUDumpTensor("ret.x", ret.x, GENERIC_SIZE);
+    //     CPUDumpTensor("ret.y", ret.y, GENERIC_SIZE);
+    //     CPUDumpTensor("ret.z", ret.z, GENERIC_SIZE);
+    // })
+
+
+    Mul(ret.x,diffuseX.Get(),ret.x,GENERIC_SIZE);
+    Mul(ret.y,diffuseY.Get(),ret.y,GENERIC_SIZE);
+    Mul(ret.z,diffuseZ.Get(),ret.z,GENERIC_SIZE);
+
+    // Mul(testX.Get(),ret.x,diffuseX.Get(),GENERIC_SIZE);
+    // Mul(testY.Get(),ret.y,diffuseY.Get(),GENERIC_SIZE);
+    // Mul(testZ.Get(),ret.z,diffuseZ.Get(),GENERIC_SIZE);
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor\n");
+    //     CPUDumpTensor("ret.x", ret.x, GENERIC_SIZE);
+    //     CPUDumpTensor("ret.y", ret.y, GENERIC_SIZE);
+    //     CPUDumpTensor("ret.z", ret.z, GENERIC_SIZE);
+    //     // CPUDumpTensor("testX", testX.Get(), GENERIC_SIZE);
+    //     // CPUDumpTensor("testY", testY.Get(), GENERIC_SIZE);
+    //     // CPUDumpTensor("testZ", testZ.Get(), GENERIC_SIZE);
+     
+    // })
 }
