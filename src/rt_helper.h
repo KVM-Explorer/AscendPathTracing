@@ -152,7 +152,7 @@ __aicore__ inline void InitColorSoA(VecSoA &color, GM_ADDR output, int block_off
  * @param rays 光线信息
  * @param count 光线数量
  */
-__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator &allocator, Sphere &sphere, RayLocalSoA &rays) {
+__aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator &allocator, Sphere &sphere, RayLocalSoA &rays, int idx, int depth) {
     using AscendC::LocalTensor;
     using namespace AscendC;
 
@@ -174,6 +174,19 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     MulAddDst(b.Get(), ocY.Get(), rays.dy, GENERIC_SIZE); // b += ocY * rays.oy
     MulAddDst(b.Get(), ocZ.Get(), rays.dz, GENERIC_SIZE); // b += ocZ * rays.oz
 
+    // DEBUG(
+    //     if (depth == 1 && idx == 0) {
+    //         printf("Debug::SphereHitInfo Depth: %d\n", depth);
+    //         // CPUDumpTensor("ocX", ocX.Get(), GENERIC_SIZE);
+    //         // CPUDumpTensor("ocY", ocY.Get(), GENERIC_SIZE);
+    //         // CPUDumpTensor("ocZ", ocZ.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("rays.dx", rays.dx, GENERIC_SIZE);
+    //         CPUDumpTensor("rays.dy", rays.dy, GENERIC_SIZE);
+    //         CPUDumpTensor("rays.dz", rays.dz, GENERIC_SIZE);
+    //         CPUDumpTensor("b", b.Get(), GENERIC_SIZE);
+    //     }
+    // )
+
     // c =  ocX * ocX + ocY * ocY + ocZ * ocZ - sphere.r2
     auto c = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(c.Get(), Float(0), GENERIC_SIZE);
@@ -182,10 +195,23 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     MulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), GENERIC_SIZE); // c += ocZ * ocZ
     Adds(c.Get(), c.Get(), -sphere.r2, GENERIC_SIZE);       // c = dot(oc, oc) - sphere.r2
 
+    // DEBUG(if (depth == 1 && idx == 0) {
+    //     printf("Debug::SphereHitInfo Depth: %d\n", depth);
+    //     CPUDumpTensor("b", b.Get(), GENERIC_SIZE);
+    //     CPUDumpTensor("c", c.Get(), GENERIC_SIZE);
+    // })
+
     // disc = b^2 - c
     auto disc = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Mul(disc.Get(), b.Get(), b.Get(), GENERIC_SIZE);    // disc = b * b
     Sub(disc.Get(), disc.Get(), c.Get(), GENERIC_SIZE); // disc = disc - c
+
+    // DEBUG(
+    //     if(depth==1&&idx==0){
+    //         printf("Debug::SphereHitInfo Depth: %d\n",depth);
+    //         CPUDumpTensor("disc", disc.Get(), GENERIC_SIZE);
+    //     }
+    // )
 
     auto discrSq = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Sqrt(discrSq.Get(), disc.Get(), GENERIC_SIZE); // tmp2 = sqrt(tmp1) | 对于负数sqrt会返回nan
@@ -195,6 +221,14 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
 
     Sub(t0.Get(), b.Get(), discrSq.Get(), GENERIC_SIZE); // t0 = b - discrSq | nan
     Add(t1.Get(), b.Get(), discrSq.Get(), GENERIC_SIZE); // t1 = b + discrSq | nan
+
+    // DEBUG({
+    //     if (depth == 1 && idx == 0) {
+    //         printf("Debug::SphereHitInfo Depth: %d\n", depth);
+    //         CPUDumpTensor("t0", t0.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("t1", t1.Get(), GENERIC_SIZE);
+    //     }
+    // })
 
     // dst = t0 > 0 ? t0 : t1
     auto t_mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -220,20 +254,20 @@ __aicore__ inline void Transpose(AscendC::LocalTensor<Float> &dst, AscendC::Loca
     // ArithProgression(indices.Get().ReinterpretCast<int32_t>(), int32_t(0), int32_t(GENERIC_SIZE), SPHERE_NUM); // half/float/int16_t/int32_t
 
     for (int i = 0; i < GENERIC_SIZE * SPHERE_NUM; i++) {
-        int32_t u=  i / SPHERE_NUM; // row
+        int32_t u = i / SPHERE_NUM; // row
         int32_t v = i % SPHERE_NUM; // col
         int32_t pos = v * GENERIC_SIZE + u;
-        
+
         indices.Get().ReinterpretCast<uint32_t>().SetValue(i, pos * sizeof(Float));
-        DEBUG({
-            if (i % 64 == 0) {
-                printf("\n");
-            }
-            printf("%d ", pos);
-        })
+        // DEBUG({
+        //     if (i % 64 == 0) {
+        //         printf("\n");
+        //     }
+        //     printf("%d ", pos);
+        // })
     }
 
-    AscendC::Gather(dst,src,indices.Get().ReinterpretCast<uint32_t>(),0,GENERIC_SIZE * SPHERE_NUM);
+    AscendC::Gather(dst, src, indices.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE * SPHERE_NUM);
 
     // BUG: Ascend Copy API Bitmask 存在模板实例化的bug
 }
@@ -292,7 +326,7 @@ __aicore__ inline void ReduceMinInfo(AscendC::LocalTensor<Float> &minIndex, Asce
 }
 
 __aicore__ inline void ComputeHitInfo(AscendC::LocalTensor<Float> &minT, AscendC::LocalTensor<Float> &minIdx, RayLocalSoA &rays,
-                                      SphereLocalSoA &spheres, Allocator &allocator) {
+                                      SphereLocalSoA &spheres, Allocator &allocator, int depth) {
     using namespace AscendC;
     auto hitInfo = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
     for (int i = 0; i < SPHERE_NUM; i++) {
@@ -305,20 +339,39 @@ __aicore__ inline void ComputeHitInfo(AscendC::LocalTensor<Float> &minT, AscendC
                 .z = spheres.z.GetValue(i)};
         // clang-format on
         auto dst = hitInfo.Get()[offset];
-        SphereHitInfo(dst, allocator, cur_sphere, rays);
+        SphereHitInfo(dst, allocator, cur_sphere, rays, i, depth);
+        // DEBUG({
+        //     if(depth==1 && i==0){
+        //         printf("Debug::ComputeHitInfo Depth: %d\n", depth);
+        //         CPUDumpTensor("dst", dst, SPHERE_NUM);
+        //     }
+        // })
     }
+
+    // DEBUG({
+    //     if (depth == 1) {
+    //         printf("Debug::ComputeHitInfo Depth: %d\n", depth);
+    //         CPUDumpTensor("hitInfo", hitInfo.Get(), GENERIC_SIZE * SPHERE_NUM);
+    //     }
+    // })
 
     auto transpose = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
 
     // Step2: ray num of hit sphere -> sphere num of hit ray
     Transpose(transpose.Get(), hitInfo.Get(), allocator);
 
+    // DEBUG({
+    //     if (depth == 1) {
+    //         CPUDumpTensor("transpose", transpose.Get(), GENERIC_SIZE * SPHERE_NUM);
+    //     }
+    // })
+
     // Step3: Compare & Get Min Index 8 float -> 32B = 1 block
     ReduceMinInfo(minIdx, minT, transpose.Get(), allocator);
 }
 
 __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<Float> &hitIndex, AscendC::LocalTensor<Float> &hitMinT,
-                                       SphereLocalSoA &spheres, Allocator &allocator) {
+                                       SphereLocalSoA &spheres, Allocator &allocator, int depth) {
     /// hitPos = rayPos + rayDir * hitMinT
 
     using namespace AscendC;
@@ -452,12 +505,19 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
 
     // normalize normal
     auto normalLen = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    auto normalLenSq = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    Duplicate(normalLenSq.Get(), Float(0), GENERIC_SIZE);
+    Duplicate(normalLen.Get(), Float(0), GENERIC_SIZE);
 
     MulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), GENERIC_SIZE);
     MulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), GENERIC_SIZE);
     MulAddDst(normalLen.Get(), normalZ.Get(), normalZ.Get(), GENERIC_SIZE);
+
+    // DEBUG({
+    //     if(depth==0){
+    //         printf("Debug::GenerateNewRays %d\n",depth);
+    //         CPUDumpTensor("normalLen", normalLen.Get(), GENERIC_SIZE);
+    //     }
+    // })
+
     Sqrt(normalLen.Get(), normalLen.Get(), GENERIC_SIZE);
 
     auto normalizeX = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -467,6 +527,20 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     Div(normalizeX.Get(), normalX.Get(), normalLen.Get(), GENERIC_SIZE);
     Div(normalizeY.Get(), normalY.Get(), normalLen.Get(), GENERIC_SIZE);
     Div(normalizeZ.Get(), normalZ.Get(), normalLen.Get(), GENERIC_SIZE);
+
+    // DEBUG({
+    //     if(depth==0){
+    //         printf("Debug::GenerateNewRays %d\n",depth);
+    //         CPUDumpTensor("normalX", normalX.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("normalY", normalY.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("normalZ", normalZ.Get(), GENERIC_SIZE);
+
+    //         CPUDumpTensor("normalLen", normalLen.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("normalizeX", normalizeX.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("normalizeY", normalizeY.Get(), GENERIC_SIZE);
+    //         CPUDumpTensor("normalizeZ", normalizeZ.Get(), GENERIC_SIZE);
+    //     }
+    // })
 
     // compute new ray direction
     // rayDir = rayDir - 2 * dot(rayDir, normal) * normal
@@ -551,11 +625,11 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     CPUDumpTensor("ret.y", ret.y, GENERIC_SIZE);
     //     CPUDumpTensor("ret.z", ret.z, GENERIC_SIZE);
     // })
+  
 
-
-    Mul(ret.x,diffuseX.Get(),ret.x,GENERIC_SIZE);
-    Mul(ret.y,diffuseY.Get(),ret.y,GENERIC_SIZE);
-    Mul(ret.z,diffuseZ.Get(),ret.z,GENERIC_SIZE);
+    Mul(ret.x, diffuseX.Get(), ret.x, GENERIC_SIZE);
+    Mul(ret.y, diffuseY.Get(), ret.y, GENERIC_SIZE);
+    Mul(ret.z, diffuseZ.Get(), ret.z, GENERIC_SIZE);
 
     // Mul(testX.Get(),ret.x,diffuseX.Get(),GENERIC_SIZE);
     // Mul(testY.Get(),ret.y,diffuseY.Get(),GENERIC_SIZE);
@@ -568,6 +642,6 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     // CPUDumpTensor("testX", testX.Get(), GENERIC_SIZE);
     //     // CPUDumpTensor("testY", testY.Get(), GENERIC_SIZE);
     //     // CPUDumpTensor("testZ", testZ.Get(), GENERIC_SIZE);
-     
+
     // })
 }

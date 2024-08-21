@@ -69,8 +69,6 @@ class KernelRender {
         ASSERT(BLOCK_LENGTH % GENERIC_SIZE == 0); // ,"Block length must be divisible by tiling length"
     }
 
-
-
     // upload sphere data to device memory
     __aicore__ inline void UploadSpheres() {
         sphereData = sphereBuf.Get<Float>();
@@ -106,7 +104,6 @@ class KernelRender {
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
 
-
         Allocator allocator;
         LocalTensor<Float> tmpBuffer = tmpBuf.Get<Float>();
         allocator.Init(tmpBuffer, GENERIC_SIZE * (GENERIC_SIZE));
@@ -119,6 +116,7 @@ class KernelRender {
         Duplicate(ret.z, Float(1.0), GENERIC_SIZE);
 
         auto retMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+        Duplicate(retMask.Get().ReinterpretCast<uint16_t>(),uint16_t(UINT16_MAX), GENERIC_SIZE *sizeof(Float)/ sizeof(uint16_t));
 
         RayLocalSoA rays;
         rays.Init(ray, GENERIC_SIZE);
@@ -137,26 +135,22 @@ class KernelRender {
         //     CPUDumpTensor("retBuffer", retBuffer.Get(), GENERIC_SIZE * 3);
         // })
 
-        int32_t cnt = 0;
+        static int32_t cnt = 0;
         int bound = 0;
-        while (bound < 1) {
-            
-
+        while (bound < 2) {
             // Step1: compute ray-sphere intersection
             auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
             auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
-            ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator);
+            ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator, bound);
 
-            // DEBUG(
-            //     if (cnt == 0) {
-            //         CPUDumpTensorU("ReduceMin Index uint32_t",hitIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-            //         CPUDumpTensorU("ReduceMin Index int32_T",hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
-            //     }
-            // )
+            DEBUG(if (cnt == 0 && bound == 1) {
+                printf("bound: %d\n", bound);
+                CPUDumpTensorU("ReduceMin Index int32_T", hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
+            })
 
             // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
-            GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator);
+            GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator, bound);
 
             // DEBUG({
             //     if (cnt == 0)
@@ -179,9 +173,9 @@ class KernelRender {
 
         // Step7: write to device queue
 
-        Adds(colors.x, ret.x, Float(0), GENERIC_SIZE);
-        Adds(colors.y, ret.y, Float(0), GENERIC_SIZE);
-        Adds(colors.z, ret.z, Float(0), GENERIC_SIZE);
+        Muls(colors.x, ret.x, Float(6), GENERIC_SIZE);
+        Muls(colors.y, ret.y, Float(6), GENERIC_SIZE);
+        Muls(colors.z, ret.z, Float(6), GENERIC_SIZE);
 
         // DEBUG({
         //     CPUDumpTensor("Color x", colors.x, GENERIC_SIZE);
@@ -192,7 +186,7 @@ class KernelRender {
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
         cnt++;
-        // DEBUG({ printf("===========cnt: %d===================\n", cnt); })
+        DEBUG({ printf("===========cnt: %d===================\n", cnt); })
     }
 
     // write device queue to system mem
