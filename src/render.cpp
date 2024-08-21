@@ -135,7 +135,7 @@ class KernelRender {
         //     CPUDumpTensor("retBuffer", retBuffer.Get(), GENERIC_SIZE * 3);
         // })
 
-        static int32_t cnt = 0;
+        // static int32_t cnt = 0;
         int bound = 0;
         while (bound < 2) {
             // Step1: compute ray-sphere intersection
@@ -144,10 +144,10 @@ class KernelRender {
 
             ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator, bound);
 
-            DEBUG(if (cnt == 0 && bound == 1) {
-                printf("bound: %d\n", bound);
-                CPUDumpTensorU("ReduceMin Index int32_T", hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
-            })
+            // DEBUG(if (cnt == 0 && bound == 1) {
+            //     printf("bound: %d\n", bound);
+            //     CPUDumpTensorU("ReduceMin Index int32_T", hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
+            // })
 
             // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
             GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator, bound);
@@ -185,8 +185,8 @@ class KernelRender {
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
-        cnt++;
-        DEBUG({ printf("===========cnt: %d===================\n", cnt); })
+        // cnt++;
+        // DEBUG({ printf("===========cnt: %d===================\n", cnt); })
     }
 
     // write device queue to system mem

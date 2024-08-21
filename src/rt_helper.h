@@ -625,11 +625,23 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     CPUDumpTensor("ret.y", ret.y, GENERIC_SIZE);
     //     CPUDumpTensor("ret.z", ret.z, GENERIC_SIZE);
     // })
-  
+    auto curX = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto curY = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto curZ = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
-    Mul(ret.x, diffuseX.Get(), ret.x, GENERIC_SIZE);
-    Mul(ret.y, diffuseY.Get(), ret.y, GENERIC_SIZE);
-    Mul(ret.z, diffuseZ.Get(), ret.z, GENERIC_SIZE);
+    auto mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+
+    // CompareScalar(mask.Get().ReinterpretCast<uint8_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(7), CMPMODE::NE, GENERIC_SIZE);
+
+    // And(retMask.ReinterpretCast<uint16_t>(),retMask.ReinterpretCast<uint16_t>(),mask.Get().ReinterpretCast<uint16_t>(),GENERIC_SIZE * sizeof(Float) / sizeof(uint16_t));
+
+    Select(curX.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseX.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+    Select(curY.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseY.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+    Select(curZ.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseZ.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+
+    Mul(ret.x, curX.Get(), ret.x, GENERIC_SIZE);
+    Mul(ret.y, curY.Get(), ret.y, GENERIC_SIZE);
+    Mul(ret.z, curZ.Get(), ret.z, GENERIC_SIZE);
 
     // Mul(testX.Get(),ret.x,diffuseX.Get(),GENERIC_SIZE);
     // Mul(testY.Get(),ret.y,diffuseY.Get(),GENERIC_SIZE);
