@@ -2,7 +2,7 @@ import os
 import sys
 import numpy as np
 
-width = 16
+width =16
 height = 16
 samples = 1
 
@@ -22,7 +22,9 @@ def decode_color(w, h, s):
     # colors = np.fromfile("./output/color.bin", dtype=np.float32).reshape(w, h, 4*samples,4)
 
     # 读取color.bin文件 数据的格式为SoA的XYZ，转化为XYZ的Array
-    colors = np.fromfile("./output/color.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
+    # colors = np.fromfile("./output/color.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
+    colors = np.fromfile("./output/test_soa.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
+
     # print(colors.shape)
     # print(colors)
     colors = colors.transpose(1, 2,3,0)
@@ -37,13 +39,23 @@ def decode_color(w, h, s):
     new_colors = np.zeros((w, h,3))
     for i in range(w):
         for j in range(h):
-            u =h - j - 1
-            pixel_values = colors[i, u, :, :]
-            new_colors[i, j] = np.mean(pixel_values, axis=0)
+            sum_color = np.zeros(3)
+            u = h - 1 - j
+            for k in range(0, 4 * s, s):
+            
+                pixel_values = colors[i, u, k:k+s, :]
+                sum_color += np.mean(pixel_values, axis=0)
+            new_colors[i, j] = sum_color / 4
+            
+            # pixel_values = colors[i, j, :, :]
+            # new_colors[i, j] = np.mean(pixel_values, axis=0)
+            # s 个元素取平均
+            
 
 
     # 裁剪到0-1之间
     clips = np.clip(new_colors, 0, 1)
+    # print(clips[0:128])
     ret = clips * 255
     ret = ret.astype(np.uint8)
     write_ppm(w, h, ret)
