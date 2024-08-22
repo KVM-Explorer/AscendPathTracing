@@ -156,12 +156,23 @@ __aicore__ inline void FakeGather(AscendC::LocalTensor<Float> &dst, AscendC::Loc
     }
 }
 
-__aicore__ inline void FakeMulAddDst(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src1, AscendC::LocalTensor<Float> &src2
-                                     ,AscendC::LocalTensor<Float> tmp,int count) {
+__aicore__ inline void FakeMulAddDst(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src1, AscendC::LocalTensor<Float> &src2,
+                                     AscendC::LocalTensor<Float> tmp, int count) {
     AscendC::Mul(tmp, src1, src2, count);
     AscendC::Add(dst, dst, tmp, count);
 }
 
+/*
+ *@brief 替代AscendC::Select函数（仅仅适用于select tensor的情况，用于解决Atlas 200I DK API不支持的问题
+ *@remark 该函数用于根据mask选择src1或src2的值，mask为0时选择src2的值，mask为1时选择src1的值，但是数据处理长度存在限制
+ */
+__aicore__ inline void FakeSelect(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src1, AscendC::LocalTensor<Float> &src2,
+                                  Float targetVal, int count) {
+    for (int i = 0; i < count; i++) {
+        auto condition = src1.GetValue(i) > targetVal;
+        dst.SetValue(i, condition ? src1.GetValue(i) : src2.GetValue(i));
+    }
+}
 /*
  * @brief 计算光线与球体的交点
  * @param dst 输出的交点对应的t值，即ray到交点的距离
@@ -188,7 +199,7 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     // b = ocX * rays.ox + ocY * rays.oy + ocZ * rays.oz
     auto b = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     auto tmp = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    Duplicate(b.Get(), Float(0), GENERIC_SIZE);           // b = 0
+    Duplicate(b.Get(), Float(0), GENERIC_SIZE); // b = 0
     // MulAddDst(b.Get(), ocX.Get(), rays.dx, GENERIC_SIZE); // b += ocX * rays.ox
     // MulAddDst(b.Get(), ocY.Get(), rays.dy, GENERIC_SIZE); // b += ocY * rays.oy
     // MulAddDst(b.Get(), ocZ.Get(), rays.dz, GENERIC_SIZE); // b += ocZ * rays.oz
@@ -219,7 +230,7 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     FakeMulAddDst(c.Get(), ocX.Get(), ocX.Get(), tmp.Get(), GENERIC_SIZE);
     FakeMulAddDst(c.Get(), ocY.Get(), ocY.Get(), tmp.Get(), GENERIC_SIZE);
     FakeMulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), tmp.Get(), GENERIC_SIZE);
-    Adds(c.Get(), c.Get(), -sphere.r2, GENERIC_SIZE);       // c = dot(oc, oc) - sphere.r2
+    Adds(c.Get(), c.Get(), -sphere.r2, GENERIC_SIZE); // c = dot(oc, oc) - sphere.r2
 
     // DEBUG(if (depth == 1 && idx == 0) {
     //     printf("Debug::SphereHitInfo Depth: %d\n", depth);
@@ -257,9 +268,11 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     // })
 
     // dst = t0 > 0 ? t0 : t1
-    auto t_mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    CompareScalar(t_mask.Get(), t0.Get(), Float(EPSILON), CMPMODE::GT, GENERIC_SIZE);                                         // mask2 = t0 > 0
-    Select(dst, t_mask.Get().ReinterpretCast<uint8_t>(), t0.Get(), t1.Get(), SELMODE::VSEL_TENSOR_TENSOR_MODE, GENERIC_SIZE); // t = mask2 ? t0 : t1
+    // auto t_mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    // CompareScalar(t_mask.Get(), t0.Get(), Float(EPSILON), CMPMODE::GT, GENERIC_SIZE);                                         // mask2 = t0 > 0
+    // Select(dst, t_mask.Get().ReinterpretCast<uint8_t>(), t0.Get(), t1.Get(), SELMODE::VSEL_TENSOR_TENSOR_MODE, GENERIC_SIZE); // t = mask2 ? t0 :
+    // t1
+    FakeSelect(dst, t0.Get(), t1.Get(), Float(EPSILON), GENERIC_SIZE);
 
     // set number less than 0 | nan to INF
 
@@ -544,7 +557,6 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     FakeMulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), tmp.Get(), GENERIC_SIZE);
     FakeMulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), tmp.Get(), GENERIC_SIZE);
     FakeMulAddDst(normalLen.Get(), normalZ.Get(), normalZ.Get(), tmp.Get(), GENERIC_SIZE);
-
 
     // DEBUG({
     //     if(depth==0){
