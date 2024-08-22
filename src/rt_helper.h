@@ -147,11 +147,11 @@ __aicore__ inline void InitColorSoA(VecSoA &color, GM_ADDR output, int block_off
 /*
  *@brief 替代AscendC::Gather函数，用于解决Atlas 200I DK API不支持的问题
  */
-__aicore__ inline void FakeGather(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src, AscendC::LocalTensor<uint32_t> index,
+__aicore__ inline void FakeGather(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src, AscendC::LocalTensor<int32_t> index,
                                   int count) {
     using namespace AscendC;
     for (int i = 0; i < count; i++) {
-        auto pos = index.GetValue(i) / sizeof(Float);
+        auto pos = index.GetValue(i);
         dst.SetValue(i, src.GetValue(pos));
     }
 }
@@ -160,6 +160,23 @@ __aicore__ inline void FakeMulAddDst(AscendC::LocalTensor<Float> &dst, AscendC::
                                      AscendC::LocalTensor<Float> tmp, int count) {
     AscendC::Mul(tmp, src1, src2, count);
     AscendC::Add(dst, dst, tmp, count);
+}
+
+// 小端，8bit数据从右往左
+__aicore__ inline void FakeCompare(AscendC::LocalTensor<uint8_t> mask, AscendC::LocalTensor<Float> &src, Float target, int count) {
+    uint8_t tmp = 0;
+    int32_t cnt = 0;
+    for (int i = 0; i < count; i++) {
+        uint8_t bit = (1 << (i % 8));
+        if (src.GetValue(i) > target) {
+            tmp = (tmp | bit);
+        }
+
+        if (i % 8 == 7) {
+            mask.SetValue(i / 8, tmp);
+            tmp = 0;
+        }
+    }
 }
 
 /*
@@ -277,7 +294,12 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     // set number less than 0 | nan to INF
 
     auto select_mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    CompareScalar(select_mask.Get(), dst, Float(EPSILON), CMPMODE::GT, GENERIC_SIZE);
+    // CompareScalar(select_mask.Get(), dst, Float(EPSILON), CMPMODE::GT, GENERIC_SIZE);
+    FakeCompare(select_mask.Get().ReinterpretCast<uint8_t>(), dst, Float(EPSILON), GENERIC_SIZE);
+
+    // DEBUG({
+    //     CPUDumpTensor("compare mask",select_mask.Get().ReinterpretCast<uint8_t>(),GENERIC_SIZE/8,true);
+    // })
 
     Select(dst, select_mask.Get().ReinterpretCast<uint8_t>(), dst, Float(1e20), SELMODE::VSEL_TENSOR_SCALAR_MODE,
            GENERIC_SIZE); // t = mask3 ? t : INF
@@ -297,7 +319,7 @@ __aicore__ inline void Transpose(AscendC::LocalTensor<Float> &dst, AscendC::Loca
         int32_t v = i % SPHERE_NUM; // col
         int32_t pos = v * GENERIC_SIZE + u;
 
-        indices.Get().ReinterpretCast<uint32_t>().SetValue(i, pos * sizeof(Float));
+        indices.Get().ReinterpretCast<uint32_t>().SetValue(i, pos);
         // DEBUG({
         //     if (i % 64 == 0) {
         //         printf("\n");
@@ -308,7 +330,7 @@ __aicore__ inline void Transpose(AscendC::LocalTensor<Float> &dst, AscendC::Loca
 
     // AscendC::Gather(dst, src, indices.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE * SPHERE_NUM);
 
-    FakeGather(dst, src, indices.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE * SPHERE_NUM);
+    FakeGather(dst, src, indices.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE * SPHERE_NUM);
 
     // BUG: Ascend Copy API Bitmask 存在模板实例化的bug
 }
