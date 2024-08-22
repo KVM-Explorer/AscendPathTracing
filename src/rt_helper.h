@@ -569,7 +569,7 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
 }
 
 __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalTensor<Float> &retMask, AscendC::LocalTensor<Float> &hitIndex,
-                                               SphereLocalSoA &spheres, Allocator &allocator) {
+                                               SphereLocalSoA &spheres, Allocator &allocator,int depth) {
     using namespace AscendC;
 
     // 提取DiffuseColor
@@ -631,9 +631,27 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
 
     auto mask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
-    // CompareScalar(mask.Get().ReinterpretCast<uint8_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(7), CMPMODE::NE, GENERIC_SIZE);
+    auto tmpIndx = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    Cast<Float>(tmpIndx.Get(), hitIndex.ReinterpretCast<int32_t>(), RoundMode::CAST_NONE, GENERIC_SIZE);
+    CompareScalar(mask.Get().ReinterpretCast<uint8_t>(), tmpIndx.Get(), Float(7), CMPMODE::NE, GENERIC_SIZE);
 
-    // And(retMask.ReinterpretCast<uint16_t>(),retMask.ReinterpretCast<uint16_t>(),mask.Get().ReinterpretCast<uint16_t>(),GENERIC_SIZE * sizeof(Float) / sizeof(uint16_t));
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor %d\n",depth);
+    //     CPUDumpTensor("retMask before", retMask.ReinterpretCast<uint8_t>(), GENERIC_SIZE / 8, true);
+    //     CPUDumpTensorU("hitIndex", hitIndex.ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    //     CPUDumpTensor("tmpIndex", tmpIndx.Get(), GENERIC_SIZE);
+    // })
+
+    And(retMask.ReinterpretCast<uint16_t>(),retMask.ReinterpretCast<uint16_t>(),mask.Get().ReinterpretCast<uint16_t>(),GENERIC_SIZE * sizeof(Float) / sizeof(uint16_t));
+
+    // DEBUG({
+    //     printf("Debug::AccumulateIntervalColor %d\n",depth);
+    //     // CPUDumpTensor("tmpIndex", tmpIndx.Get(), GENERIC_SIZE);
+    //     // CPUDumpTensorU("hitIndex", hitIndex.ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    //     CPUDumpTensor("mask", mask.Get().ReinterpretCast<uint8_t>(), GENERIC_SIZE/8, true);
+    //     CPUDumpTensor("retMask", retMask.ReinterpretCast<uint8_t>(), GENERIC_SIZE/8, true);
+    //     printf("-------------------------------\n");
+    // })
 
     Select(curX.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseX.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
     Select(curY.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseY.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);

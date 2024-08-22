@@ -137,7 +137,7 @@ class KernelRender {
 
         // static int32_t cnt = 0;
         int bound = 0;
-        while (bound < 2) {
+        while (bound < 5) {
             // Step1: compute ray-sphere intersection
             auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
             auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
@@ -165,7 +165,7 @@ class KernelRender {
             // })
 
             // Step5: compute diffuse color & mask
-            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator);
+            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator,bound);
             bound++;
         }
 
@@ -173,9 +173,9 @@ class KernelRender {
 
         // Step7: write to device queue
 
-        Muls(colors.x, ret.x, Float(6), GENERIC_SIZE);
-        Muls(colors.y, ret.y, Float(6), GENERIC_SIZE);
-        Muls(colors.z, ret.z, Float(6), GENERIC_SIZE);
+        Muls(colors.x, ret.x, Float(12), GENERIC_SIZE);
+        Muls(colors.y, ret.y, Float(12), GENERIC_SIZE);
+        Muls(colors.z, ret.z, Float(12), GENERIC_SIZE);
 
         // DEBUG({
         //     CPUDumpTensor("Color x", colors.x, GENERIC_SIZE);
