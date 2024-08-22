@@ -14,7 +14,7 @@
 */
 
 #ifdef __CCE_KT_TEST__
-template <typename T> inline void CPUDumpTensor(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
+template <typename T> inline void CPUDumpTensor(const char *name, const AscendC::LocalTensor<T> tensor, int count, bool ismask = false) {
     printf("%s: \n\t", name);
     auto format_str = "%5.3f ";
     if (ismask)
@@ -26,7 +26,7 @@ template <typename T> inline void CPUDumpTensor(const char *name, const AscendC:
     }
     printf("\n");
 }
-template <typename T> inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> &tensor, int count, bool ismask = false) {
+template <typename T> inline void CPUDumpTensorU(const char *name, const AscendC::LocalTensor<T> tensor, int count, bool ismask = false) {
     printf("%s: \n\t", name);
 
     auto format_str = "%d ";
@@ -179,6 +179,27 @@ __aicore__ inline void FakeCompare(AscendC::LocalTensor<uint8_t> mask, AscendC::
     }
 }
 
+// 辅助函数基于假设每个8bit仅有一个1bit，小端，从右往左依次对应位序0-7
+__aicore__ inline uint32_t ConvertBitToValue(uint8_t val) {
+    uint8_t p = 0;
+    while (val > 0) {
+        auto cur = val & 1;
+        if (cur)
+            return p;
+        p++;
+        val = (val >> 1);
+    }
+    return 0;
+}
+
+__aicore__ inline void FakeGatherMask(AscendC::LocalTensor<uint32_t> dst, AscendC::LocalTensor<uint8_t> indexBit, int count) {
+    for (int i = 0; i < count; i++) {
+        auto mask = indexBit.GetValue(i);
+        auto index = ConvertBitToValue(mask);
+        dst.SetValue(i, index);
+    }
+}
+
 /*
  *@brief 替代AscendC::Select函数（仅仅适用于select tensor的情况，用于解决Atlas 200I DK API不支持的问题
  *@remark 该函数用于根据mask选择src1或src2的值，mask为0时选择src2的值，mask为1时选择src1的值，但是数据处理长度存在限制
@@ -188,6 +209,39 @@ __aicore__ inline void FakeSelect(AscendC::LocalTensor<Float> &dst, AscendC::Loc
     for (int i = 0; i < count; i++) {
         auto condition = src1.GetValue(i) > targetVal;
         dst.SetValue(i, condition ? src1.GetValue(i) : src2.GetValue(i));
+    }
+}
+
+__aicore__ inline void FakeSelectScalar(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<uint8_t> mask, AscendC::LocalTensor<Float> &src1,
+                                        Float target, int count) {
+    for (int i = 0; i < count; i += 8) {
+        auto bitmask = mask.GetValue(i / 8);
+
+        for (int j = 0; j < 8; j++) {
+            uint8_t cur = (bitmask & 1);
+            auto pos = i + j;
+            if (cur) {
+                dst.SetValue(pos, src1.GetValue(pos));
+            } else {
+                dst.SetValue(pos, target);
+            }
+            bitmask >>= 1;
+        }
+    }
+}
+
+// Not Equal
+__aicore__ inline void FakeCompareScalar(AscendC::LocalTensor<uint8_t> dst, AscendC::LocalTensor<Float> &src, Float target,
+                                         int count) {
+    uint8_t tmp = 0;
+    for (int i = 0; i < count/8; i++) {
+        for(int j=0;j<8;j++){
+            auto pos = i*8+j;
+            auto cur = src.GetValue(pos) != target;
+            tmp = (tmp | (cur << j));
+        }
+        dst.SetValue(i,tmp);
+        tmp = 0;
     }
 }
 /*
@@ -361,24 +415,27 @@ __aicore__ inline void ReduceMinInfo(AscendC::LocalTensor<Float> &minIndex, Asce
 
     // Collect 1bit index in each datablock
 
-    auto sphereIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
-    // 构造Sphere索引
-    for (int i = 0; i < GENERIC_SIZE; i++) {
-        auto offset = i * SPHERE_NUM;
-        for (int j = 0; j < SPHERE_NUM; j++) {
-            sphereIndex.Get().ReinterpretCast<uint32_t>().SetValue(offset + j, uint32_t(j));
-        }
-    }
+    // auto sphereIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE * SPHERE_NUM));
+    // // 构造Sphere索引
+    // for (int i = 0; i < GENERIC_SIZE; i++) {
+    //     auto offset = i * SPHERE_NUM;
+    //     for (int j = 0; j < SPHERE_NUM; j++) {
+    //         sphereIndex.Get().ReinterpretCast<uint32_t>().SetValue(offset + j, uint32_t(j));
+    //     }
+    // }
 
     // DEBUG({
     //     printf("Debug::RecudeInfo sphereIndex\n");
     //     CPUDumpTensorU("sphereIndex", sphereIndex.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE * SPHERE_NUM);
     // })
 
-    auto gatherMaskParam = GatherMaskParams{0, 8, 0, 8};
-    uint64_t gatherCount = 0;
-    GatherMask(minIndex.ReinterpretCast<uint32_t>(), sphereIndex.Get().ReinterpretCast<uint32_t>(), rawIndex.Get().ReinterpretCast<uint32_t>(), false,
-               0, gatherMaskParam, gatherCount);
+    // auto gatherMaskParam = GatherMaskParams{0, 8, 0, 8};
+    // uint64_t gatherCount = 0;
+    // GatherMask(minIndex.ReinterpretCast<uint32_t>(), sphereIndex.Get().ReinterpretCast<uint32_t>(), rawIndex.Get().ReinterpretCast<uint32_t>(),
+    // false,
+    //            0, gatherMaskParam, gatherCount);
+
+    FakeGatherMask(minIndex.ReinterpretCast<uint32_t>(), rawIndex.Get().ReinterpretCast<uint8_t>(), GENERIC_SIZE);
 
     // DEBUG({
     //     printf("Debug::RecudeInfo minIndex\n");
@@ -482,8 +539,8 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     // Cast<uint32_t>(srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), srcOffsetLocal.Get().ReinterpretCast<int32_t>(),RoundMode::CAST_NONE,
     // GENERIC_SIZE);
 
-    auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
+    // auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    // Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
     Duplicate(sphereX.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereY.Get(), Float(-1), GENERIC_SIZE);
@@ -492,9 +549,9 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     // Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     // Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     // Gather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    FakeGather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    FakeGather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    FakeGather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    FakeGather(sphereX.Get(), spheres.x, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
+    FakeGather(sphereY.Get(), spheres.y, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
+    FakeGather(sphereZ.Get(), spheres.z, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
 
     // DEBUG({
     //     // CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
@@ -660,9 +717,9 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     // Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     // Gather(diffuseZ.Get(), spheres.colorZ, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
 
-    FakeGather(diffuseX.Get(), spheres.colorX, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    FakeGather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
-    FakeGather(diffuseZ.Get(), spheres.colorZ, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), GENERIC_SIZE);
+    FakeGather(diffuseX.Get(), spheres.colorX, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
+    FakeGather(diffuseY.Get(), spheres.colorY, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
+    FakeGather(diffuseZ.Get(), spheres.colorZ, hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE);
 
     // DEBUG({
     //     printf("Debug::AccumulateIntervalColor\n");
@@ -703,7 +760,11 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
 
     auto tmpIndx = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Cast<Float>(tmpIndx.Get(), hitIndex.ReinterpretCast<int32_t>(), RoundMode::CAST_NONE, GENERIC_SIZE);
-    CompareScalar(mask.Get().ReinterpretCast<uint8_t>(), tmpIndx.Get(), Float(7), CMPMODE::NE, GENERIC_SIZE);
+    // BUG: CompareScalar API Atlas 200IDK 8.0RC2版本存在问题，结果异常(不排除对齐问题，但是数据满足长度对齐要求)
+    // CompareScalar(mask.Get().ReinterpretCast<uint8_t>(), tmpIndx.Get(), Float(7), CMPMODE::NE, GENERIC_SIZE);
+    FakeCompareScalar(mask.Get().ReinterpretCast<uint8_t>(), tmpIndx.Get(), Float(7), GENERIC_SIZE);
+
+    
 
     // DEBUG({
     //     printf("Debug::AccumulateIntervalColor %d\n",depth);
@@ -724,9 +785,14 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     //     printf("-------------------------------\n");
     // })
 
-    Select(curX.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseX.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
-    Select(curY.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseY.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
-    Select(curZ.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseZ.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+    // BUG: Select Error(??) Atlas 200IDK 8.0RC2版本存在问题，结果异常(不排除对齐问题，但是数据满足长度对齐要求)
+    // Select(curX.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseX.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+    // Select(curY.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseY.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+    // Select(curZ.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseZ.Get(), Float(1), SELMODE::VSEL_TENSOR_SCALAR_MODE, GENERIC_SIZE);
+
+    FakeSelectScalar(curX.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseX.Get(), Float(1), GENERIC_SIZE);
+    FakeSelectScalar(curY.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseY.Get(), Float(1), GENERIC_SIZE);
+    FakeSelectScalar(curZ.Get(), retMask.ReinterpretCast<uint8_t>(), diffuseZ.Get(), Float(1), GENERIC_SIZE);
 
     Mul(ret.x, curX.Get(), ret.x, GENERIC_SIZE);
     Mul(ret.y, curY.Get(), ret.y, GENERIC_SIZE);
