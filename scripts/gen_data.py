@@ -3,9 +3,9 @@
 # Copyright 2022-2023 Huawei Technologies Co., Ltd
 import numpy as np
 
-width = 128
-height = 128
-samples = 8
+width = 16
+height = 16
+samples = 1
 eps = 1e-4
 bounceMax = 5
 Mode = "release"
@@ -441,6 +441,6 @@ if __name__ == "__main__":
     rays = gen_rays(width, height, samples)
     spheres = gen_spheres()
     # test_scene(rays, spheres)
-    test_soa(rays, spheres)
+    # test_soa(rays, spheres)
 
     print("===========Python Script Done=============")

@@ -2,9 +2,9 @@ import os
 import sys
 import numpy as np
 
-width = 128
-height = 128
-samples = 8
+width = 16
+height = 16
+samples = 1
 
 # decode from color bin to PPM image
 

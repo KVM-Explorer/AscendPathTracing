@@ -156,6 +156,12 @@ __aicore__ inline void FakeGather(AscendC::LocalTensor<Float> &dst, AscendC::Loc
     }
 }
 
+__aicore__ inline void FakeMulAddDst(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src1, AscendC::LocalTensor<Float> &src2
+                                     ,AscendC::LocalTensor<Float> tmp,int count) {
+    AscendC::Mul(tmp, src1, src2, count);
+    AscendC::Add(dst, dst, tmp, count);
+}
+
 /*
  * @brief 计算光线与球体的交点
  * @param dst 输出的交点对应的t值，即ray到交点的距离
@@ -181,10 +187,15 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
 
     // b = ocX * rays.ox + ocY * rays.oy + ocZ * rays.oz
     auto b = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    auto tmp = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(b.Get(), Float(0), GENERIC_SIZE);           // b = 0
-    MulAddDst(b.Get(), ocX.Get(), rays.dx, GENERIC_SIZE); // b += ocX * rays.ox
-    MulAddDst(b.Get(), ocY.Get(), rays.dy, GENERIC_SIZE); // b += ocY * rays.oy
-    MulAddDst(b.Get(), ocZ.Get(), rays.dz, GENERIC_SIZE); // b += ocZ * rays.oz
+    // MulAddDst(b.Get(), ocX.Get(), rays.dx, GENERIC_SIZE); // b += ocX * rays.ox
+    // MulAddDst(b.Get(), ocY.Get(), rays.dy, GENERIC_SIZE); // b += ocY * rays.oy
+    // MulAddDst(b.Get(), ocZ.Get(), rays.dz, GENERIC_SIZE); // b += ocZ * rays.oz
+
+    FakeMulAddDst(b.Get(), ocX.Get(), rays.dx, tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(b.Get(), ocY.Get(), rays.dy, tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(b.Get(), ocZ.Get(), rays.dz, tmp.Get(), GENERIC_SIZE);
 
     // DEBUG(
     //     if (depth == 1 && idx == 0) {
@@ -202,9 +213,12 @@ __aicore__ inline void SphereHitInfo(AscendC::LocalTensor<Float> &dst, Allocator
     // c =  ocX * ocX + ocY * ocY + ocZ * ocZ - sphere.r2
     auto c = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(c.Get(), Float(0), GENERIC_SIZE);
-    MulAddDst(c.Get(), ocX.Get(), ocX.Get(), GENERIC_SIZE); // c += ocX * ocX
-    MulAddDst(c.Get(), ocY.Get(), ocY.Get(), GENERIC_SIZE); // c += ocY * ocY
-    MulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), GENERIC_SIZE); // c += ocZ * ocZ
+    // MulAddDst(c.Get(), ocX.Get(), ocX.Get(), GENERIC_SIZE); // c += ocX * ocX
+    // MulAddDst(c.Get(), ocY.Get(), ocY.Get(), GENERIC_SIZE); // c += ocY * ocY
+    // MulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), GENERIC_SIZE); // c += ocZ * ocZ
+    FakeMulAddDst(c.Get(), ocX.Get(), ocX.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(c.Get(), ocY.Get(), ocY.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(c.Get(), ocZ.Get(), ocZ.Get(), tmp.Get(), GENERIC_SIZE);
     Adds(c.Get(), c.Get(), -sphere.r2, GENERIC_SIZE);       // c = dot(oc, oc) - sphere.r2
 
     // DEBUG(if (depth == 1 && idx == 0) {
@@ -523,9 +537,14 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     auto normalLen = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(normalLen.Get(), Float(0), GENERIC_SIZE);
 
-    MulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), GENERIC_SIZE);
-    MulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), GENERIC_SIZE);
-    MulAddDst(normalLen.Get(), normalZ.Get(), normalZ.Get(), GENERIC_SIZE);
+    auto tmp = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    // MulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), GENERIC_SIZE);
+    // MulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), GENERIC_SIZE);
+    // MulAddDst(normalLen.Get(), normalZ.Get(), normalZ.Get(), GENERIC_SIZE);
+    FakeMulAddDst(normalLen.Get(), normalX.Get(), normalX.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(normalLen.Get(), normalY.Get(), normalY.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(normalLen.Get(), normalZ.Get(), normalZ.Get(), tmp.Get(), GENERIC_SIZE);
+
 
     // DEBUG({
     //     if(depth==0){
@@ -567,9 +586,12 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
 
     auto dotValue = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Duplicate(dotValue.Get(), Float(0), GENERIC_SIZE);
-    MulAddDst(dotValue.Get(), rays.dx, normalizeX.Get(), GENERIC_SIZE);
-    MulAddDst(dotValue.Get(), rays.dy, normalizeY.Get(), GENERIC_SIZE);
-    MulAddDst(dotValue.Get(), rays.dz, normalizeZ.Get(), GENERIC_SIZE);
+    // MulAddDst(dotValue.Get(), rays.dx, normalizeX.Get(), GENERIC_SIZE);
+    // MulAddDst(dotValue.Get(), rays.dy, normalizeY.Get(), GENERIC_SIZE);
+    // MulAddDst(dotValue.Get(), rays.dz, normalizeZ.Get(), GENERIC_SIZE);
+    FakeMulAddDst(dotValue.Get(), rays.dx, normalizeX.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(dotValue.Get(), rays.dy, normalizeY.Get(), tmp.Get(), GENERIC_SIZE);
+    FakeMulAddDst(dotValue.Get(), rays.dz, normalizeZ.Get(), tmp.Get(), GENERIC_SIZE);
     Muls(dotValue.Get(), dotValue.Get(), Float(2), GENERIC_SIZE);
     Mul(normalX.Get(), normalizeX.Get(), dotValue.Get(), GENERIC_SIZE);
     Mul(normalY.Get(), normalizeY.Get(), dotValue.Get(), GENERIC_SIZE);
