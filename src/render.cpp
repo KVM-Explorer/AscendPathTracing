@@ -50,6 +50,9 @@ class KernelRender {
 
         UploadSpheres();
         for (int i = 0; i < loop_count; i++) {
+            if(GetBlockIdx() == 0)
+                AscendC::printf("progress %d/%d\n", i, loop_count);
+
             CopyIn(i);
             Compute(i);
             CopyOut(i);
@@ -99,7 +102,6 @@ class KernelRender {
 
     // read device memory & compute & output to device queue & all samples
     __aicore__ inline void Compute(int32_t progress) {
-        // printf("compute %d\n", progress);
 
         LocalTensor<Float> ray = rayQueue.DeQue<Float>();           // xxx |yyy|zzz| dxdxdx |dydydy|dzdzdz
         LocalTensor<Float> color = colorQueue.AllocTensor<Float>(); // xxx |yyy|zzz
@@ -135,29 +137,36 @@ class KernelRender {
         //     CPUDumpTensor("retBuffer", retBuffer.Get(), GENERIC_SIZE * 3);
         // })
 
-        // static int32_t cnt = 0;
-        int bound = 0;
-        while (bound < 5) {
+        int depth = 0;
+        while (depth < 5) {
+
             // Step1: compute ray-sphere intersection
             auto hitMinT = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
             auto hitIndex = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
 
-            ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator, bound);
+            ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator, depth);
 
-            // DEBUG(if (cnt == 0 && bound == 1) {
-            //     printf("bound: %d\n", bound);
+            // DEBUG(if (cnt == 0 && depth == 1) {
+            //     printf("bound: %d\n", depth);
             //     CPUDumpTensorU("ReduceMin Index int32_T", hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
             // })
 
             // Step4: update ray info, compute hitPos-rayPos,hitPos-SpherePos-rayDir
-            GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator, bound);
+            // DEBUG({
+            //     CPUDumpTensor("Old ray x", rays.ox, GENERIC_SIZE);
+            //     CPUDumpTensor("Old ray y", rays.oy, GENERIC_SIZE);
+            //     CPUDumpTensor("Old ray z", rays.oz, GENERIC_SIZE);
+            // })
+
+            GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator, progress, depth);
 
             // DEBUG({
+                // printf("bound: %d\n", depth);
             //     if (cnt == 0)
             //     {
-            //         CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
-            //         CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
-            //         CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
+                    // CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
+                    // CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
+                    // CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dx", rays.dx, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dy", rays.dy, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dz", rays.dz, GENERIC_SIZE);
@@ -165,7 +174,7 @@ class KernelRender {
             // })
 
             // Step5: compute diffuse color & mask
-            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator, bound);
+            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator, progress, depth);
 
             // DEBUG({
             //     printf("process %d depth %d\n",progress,bound);
@@ -174,8 +183,7 @@ class KernelRender {
             //     CPUDumpTensor("Color z", ret.z, GENERIC_SIZE);
             // })
 
-
-            bound++;
+            depth++;
         }
 
         // Step6: compute final color
@@ -185,12 +193,6 @@ class KernelRender {
         Muls(colors.x, ret.x, Float(12), GENERIC_SIZE);
         Muls(colors.y, ret.y, Float(12), GENERIC_SIZE);
         Muls(colors.z, ret.z, Float(12), GENERIC_SIZE);
-
-        // DEBUG({
-        //     CPUDumpTensor("Color x", colors.x, GENERIC_SIZE);
-        //     CPUDumpTensor("Color y", colors.y, GENERIC_SIZE);
-        //     CPUDumpTensor("Color z", colors.z, GENERIC_SIZE);
-        // })
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
