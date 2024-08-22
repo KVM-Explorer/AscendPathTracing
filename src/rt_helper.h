@@ -144,6 +144,15 @@ __aicore__ inline void InitColorSoA(VecSoA &color, GM_ADDR output, int block_off
     color.z.SetGlobalBuffer((__gm__ Float *)output + color_offset * 2 + block_offset, block_length);
 }
 
+
+__aicore__ inline void FakeGather(AscendC::LocalTensor<Float> &dst, AscendC::LocalTensor<Float> &src, AscendC::LocalTensor<uint32_t> index,int count) {
+    using namespace AscendC;
+    for(int i=0;i<count;i++){
+        auto pos = index.GetValue(i) / sizeof(Float);
+        dst.SetValue(i,src.GetValue(pos));
+    }
+}
+
 /*
  * @brief 计算光线与球体的交点
  * @param dst 输出的交点对应的t值，即ray到交点的距离
@@ -267,7 +276,9 @@ __aicore__ inline void Transpose(AscendC::LocalTensor<Float> &dst, AscendC::Loca
         // })
     }
 
-    AscendC::Gather(dst, src, indices.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE * SPHERE_NUM);
+    // AscendC::Gather(dst, src, indices.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE * SPHERE_NUM);
+
+    FakeGather(dst,src,indices.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE*SPHERE_NUM);
 
     // BUG: Ascend Copy API Bitmask 存在模板实例化的bug
 }
@@ -426,9 +437,12 @@ __aicore__ inline void GenerateNewRays(RayLocalSoA &rays, AscendC::LocalTensor<F
     Duplicate(sphereY.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(sphereZ.Get(), Float(-1), GENERIC_SIZE);
 
-    Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(sphereX.Get(), spheres.x, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(sphereY.Get(), spheres.y, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(sphereZ.Get(), spheres.z, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    FakeGather(sphereX.Get(),spheres.x,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
+    FakeGather(sphereY.Get(),spheres.y,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
+    FakeGather(sphereZ.Get(),spheres.z,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
 
     // DEBUG({
     //     // CPUDumpTensorU("Index Raw", hitIndex.ReinterpretCast<int32_t>(), GENERIC_SIZE, true);
@@ -584,14 +598,14 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
     Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
-    auto tmpDiffuseZ = AllocDecorator(allocator.Alloc(SPHERE_NUM));
-    for (int i = 0; i < SPHERE_NUM; i++) {
-        tmpDiffuseZ.Get().SetValue(i, spheres.colorZ.GetValue(i));
-    }
 
-    Gather(diffuseX.Get(), spheres.colorX, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
-    Gather(diffuseZ.Get(), tmpDiffuseZ.Get(), srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(diffuseX.Get(), spheres.colorX, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+    // Gather(diffuseZ.Get(), spheres.colorZ, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
+
+    FakeGather(diffuseX.Get(),spheres.colorX,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
+    FakeGather(diffuseY.Get(),spheres.colorY,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
+    FakeGather(diffuseZ.Get(),spheres.colorZ,srcOffsetLocal.Get().ReinterpretCast<uint32_t>(),GENERIC_SIZE);
 
     // DEBUG({
     //     printf("Debug::AccumulateIntervalColor\n");

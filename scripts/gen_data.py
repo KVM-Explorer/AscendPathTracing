@@ -7,6 +7,7 @@ width = 16
 height = 16
 samples = 1
 eps = 1e-4
+bounceMax = 5
 
 
 def PrintTensor(name,tensor , itemPerLine=8):
@@ -92,11 +93,11 @@ def gen_spheres():
     spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.667, 0.129, 0.086])
     spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.270, 0.725, 0.486])
     spheres = np.append(spheres, [1e5, 50, 40.8, -1e5+170,   0,0, 0,   0, 0, 0]) # Front Dark
-    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,  1.0, 0.902, 0.00])
-    spheres = np.append(spheres, [1e5, 50, -1e5+81.6, 81.6,   0,0, 0,   0.141, 0.408, 0.635])
-    spheres = np.append(spheres, [16.5, 27, 16.5, 47,   0,0, 0,   0.999, 0.999, 0.999])
+    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,  1.0, 0.902, 0.00]) # Bottom
+    spheres = np.append(spheres, [1e5, 50, -1e5+81.6, 81.6,   0,0, 0,   0.141, 0.408, 0.635]) # Top
+    spheres = np.append(spheres, [16.5, 27, 16.5, 47,   0,0, 0,   0.999, 0.999, 0.999]) # Mirror
     # spheres = np.append(spheres, [16.5, 73, 16.5, 78,   0,0, 0,   0.999, 0.999, 0.999])
-    spheres = np.append(spheres, [600, 50, 681.6-0.27, 81.6,   12, 12, 12,   0, 0, 0])
+    spheres = np.append(spheres, [600, 50, 681.6-0.27, 81.6,   12, 12, 12,   0, 0, 0]) # Light
 
     # change spheres r -> r^2
     # print("sphere gen shape",spheres.shape)
@@ -265,8 +266,8 @@ def test_soa(rays,spheres):
     mask = np.ones((rays.shape[1]),dtype=np.float32)
     # print("mask shape",mask.shape)
 
-    bound = 0
-    while bound < 5:
+    bounce = 0
+    while bounce < bounceMax:
         # print("bound: ===========================",bound)
         stage1val = np.zeros((spheres.shape[1],rays.shape[1]),dtype=np.float32)
         # print("stage1val shape",stage1val.shape)
@@ -274,7 +275,7 @@ def test_soa(rays,spheres):
 
         for k in range(0,core_num):
             for j in range(0,tilings_num):
-                    tmp = sim_npu(rays,spheres,k,j,block_len,tilings_len,bound)
+                    tmp = sim_npu(rays,spheres,k,j,block_len,tilings_len,bounce)
 
                     # 合并tmp到stage1val
                     start = k * block_len + j * tilings_len  
@@ -388,11 +389,16 @@ def test_soa(rays,spheres):
             if mask[i] != 0:
                 ret_color[i] = ret_color[i] * spheres[7:10,int(reduce_ret[i,1])]
             
-
+        debug_color = ret_color
+        debug_color = debug_color.T
+        print("debug_color shape: ",debug_color.shape)
+        PrintTensor("colorX",debug_color[0,0:64])
+        PrintTensor("colorY",debug_color[1,0:64])
+        PrintTensor("colorZ",debug_color[2,0:64])
 
         new_ray = new_ray.T
         rays = new_ray
-        bound += 1
+        bounce += 1
     # print("new_ray shape: ",new_ray.shape)
     # print("new_ray x:",new_ray[0,:10])
     # print("new_ray y:",new_ray[1,:10])

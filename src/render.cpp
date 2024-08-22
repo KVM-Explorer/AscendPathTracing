@@ -116,7 +116,7 @@ class KernelRender {
         Duplicate(ret.z, Float(1.0), GENERIC_SIZE);
 
         auto retMask = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-        Duplicate(retMask.Get().ReinterpretCast<uint16_t>(),uint16_t(UINT16_MAX), GENERIC_SIZE *sizeof(Float)/ sizeof(uint16_t));
+        Duplicate(retMask.Get().ReinterpretCast<uint16_t>(), uint16_t(UINT16_MAX), GENERIC_SIZE * sizeof(Float) / sizeof(uint16_t));
 
         RayLocalSoA rays;
         rays.Init(ray, GENERIC_SIZE);
@@ -165,7 +165,16 @@ class KernelRender {
             // })
 
             // Step5: compute diffuse color & mask
-            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator,bound);
+            AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator, bound);
+
+            // DEBUG({
+            //     printf("process %d depth %d\n",progress,bound);
+            //     CPUDumpTensor("Color x", ret.x, GENERIC_SIZE);
+            //     CPUDumpTensor("Color y", ret.y, GENERIC_SIZE);
+            //     CPUDumpTensor("Color z", ret.z, GENERIC_SIZE);
+            // })
+
+
             bound++;
         }
 
