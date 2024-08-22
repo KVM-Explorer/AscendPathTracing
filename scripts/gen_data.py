@@ -3,17 +3,19 @@
 # Copyright 2022-2023 Huawei Technologies Co., Ltd
 import numpy as np
 
-width = 16
-height = 16
-samples = 1
+width = 128
+height = 128
+samples = 8
 eps = 1e-4
 bounceMax = 5
+Mode = "release"
 
 
 def PrintTensor(name,tensor , itemPerLine=8):
-    print(name, "shape: ", tensor.shape)
-    for i in range(0, tensor.shape[0], itemPerLine):
-        print("\t",tensor[i:i+itemPerLine])
+    if Mode == "debug":
+        print(name, "shape: ", tensor.shape)
+        for i in range(0, tensor.shape[0], itemPerLine):
+            print("\t",tensor[i:i+itemPerLine])
 
 
 def gen_rays(w, h, s):
@@ -90,10 +92,10 @@ Sphere spheres[] = {//Scene: radius, position, emission, color, material
 def gen_spheres():
     spheres = np.array([],dtype=np.float32) # 8 spheres
     spheres = np.append(spheres, [1e5, 1e5+1, 40.8, 81.6,   0,0, 0,   0.435, 0.376, 0.667])  # radius, x, y, z, emission xyz, color xyz
-    spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.667, 0.129, 0.086])
+    spheres = np.append(spheres, [1e5, -1e5+99, 40.8, 81.6,   0,0, 0,   0.667, 0.129, 0.086]) 
     spheres = np.append(spheres, [1e5, 50, 40.8, 1e5,   0,0, 0,   0.270, 0.725, 0.486])
     spheres = np.append(spheres, [1e5, 50, 40.8, -1e5+170,   0,0, 0,   0, 0, 0]) # Front Dark
-    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,  1.0, 0.902, 0.00]) # Bottom
+    spheres = np.append(spheres, [1e5, 50, 1e5, 81.6,   0,0, 0,  0.5, 0.5, 0.5]) # Bottom
     spheres = np.append(spheres, [1e5, 50, -1e5+81.6, 81.6,   0,0, 0,   0.141, 0.408, 0.635]) # Top
     spheres = np.append(spheres, [16.5, 27, 16.5, 47,   0,0, 0,   0.999, 0.999, 0.999]) # Mirror
     # spheres = np.append(spheres, [16.5, 73, 16.5, 78,   0,0, 0,   0.999, 0.999, 0.999])
@@ -150,8 +152,6 @@ def test_scene(rays, spheres):
             op = sphere[1:4] - ray[0] # L = O - C
             # print("op",op)
             b = np.dot(op, ray[1]) # b = L * D
-            b2 = b * b # TODO: remove
-            c = np.dot(op, op) - sphere[0] # c = L^2 - r^2 TODO: remove
             det = b * b - np.dot(op, op) + sphere[0] # det = b^2 - L^2 + r^2
             if det < 0:
                 continue
@@ -391,10 +391,12 @@ def test_soa(rays,spheres):
             
         debug_color = ret_color
         debug_color = debug_color.T
-        print("debug_color shape: ",debug_color.shape)
-        PrintTensor("colorX",debug_color[0,0:64])
-        PrintTensor("colorY",debug_color[1,0:64])
-        PrintTensor("colorZ",debug_color[2,0:64])
+        stx = block_len * 2 + tilings_len * 25 
+        enx = block_len * 2 + tilings_len * 25 + 64
+        # print("debug_color shape: ",debug_color.shape,"depth: ",bounce)
+        PrintTensor("colorX",debug_color[0,stx:enx])
+        PrintTensor("colorY",debug_color[1,stx:enx])
+        PrintTensor("colorZ",debug_color[2,stx:enx])
 
         new_ray = new_ray.T
         rays = new_ray
