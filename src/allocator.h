@@ -100,7 +100,7 @@ class Allocator {
                 return {this, id1, base[node1->data.start]};
             }
         }
-#ifdef __CCE_KT_TEST__
+#ifdef ASCENDC_CPU_DEBUG
         throw std::runtime_error("no enough memory");
 #endif
         return {nullptr, 0, base[0]};
@@ -150,7 +150,7 @@ class Allocator {
         // }
     }
 
-#ifdef __CCE_KT_TEST__
+#ifdef ASCENDC_CPU_DEBUG
     __aicore__ inline bool Check(uint32_t id) {
         for (auto p = head; p != nullptr; p = p->next) {
             if (p->data.id == id) {
@@ -259,7 +259,7 @@ class AllocDecorator {
     }
 
     __aicore__ inline AscendC::LocalTensor<Float> &Get() {
-#ifdef __CCE_KT_TEST__
+#ifdef ASCENDC_CPU_DEBUG
         if (allocInfo.allocator->Check(allocInfo.id)) {
             printf("warning: double free %d\n", allocInfo.id);
         }

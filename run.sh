@@ -1,10 +1,9 @@
 #!/bin/bash
-export PRINT_TIK_MEM_ACCESS=FALSE
-
 CURRENT_DIR=$(
     cd $(dirname ${BASH_SOURCE:-$0})
     pwd
-); cd $CURRENT_DIR
+)
+cd $CURRENT_DIR
 
 declare -A VersionMap
 VersionMap["Ascend910A"]="Ascend910A"
@@ -35,27 +34,30 @@ LONG=run-mode:,soc-version:,install-path:,
 OPTS=$(getopt -a --options $SHORT --longoptions $LONG -- "$@")
 eval set -- "$OPTS"
 
-while :
-do
+while :; do
     case "$1" in
-        (-r | --run-mode )
-            RUN_MODE="$2"
-            shift 2;;
-        (-v | --soc-version )
-            SOC_VERSION="$2"
-            shift 2;;
-        (-i | --install-path )
-            ASCEND_INSTALL_PATH="$2"
-            shift 2;;
-        (--)
-            shift;
-            break;;
-        (*)
-            echo "[ERROR] Unexpected option: $1";
-            break;;
+    -r | --run-mode)
+        RUN_MODE="$2"
+        shift 2
+        ;;
+    -v | --soc-version)
+        SOC_VERSION="$2"
+        shift 2
+        ;;
+    -i | --install-path)
+        ASCEND_INSTALL_PATH="$2"
+        shift 2
+        ;;
+    --)
+        shift
+        break
+        ;;
+    *)
+        echo "[ERROR] Unexpected option: $1"
+        break
+        ;;
     esac
 done
-
 
 if [ -n "$ASCEND_INSTALL_PATH" ]; then
     _ASCEND_INSTALL_PATH=$ASCEND_INSTALL_PATH
@@ -100,14 +102,14 @@ fi
 set -e
 rm -rf build *_cpu *_sim *_npu cceprint npuchk *log *.vcd
 
-mkdir build
-cmake -B build                            \
-    -Dsmoke_testcase=${FILE_NAME}         \
+rm -rf build
+mkdir -p build
+cmake -B build \
+    -Dsmoke_testcase=${FILE_NAME} \
     -DASCEND_PRODUCT_TYPE=${_SOC_VERSION} \
-    -DASCEND_CORE_TYPE=${CORE_TYPE}       \
-    -DASCEND_RUN_MODE=${RUN_MODE}         \
-    -DASCEND_INSTALL_PATH=${_ASCEND_INSTALL_PATH} \
-
+    -DASCEND_CORE_TYPE=${CORE_TYPE} \
+    -DASCEND_RUN_MODE=${RUN_MODE} \
+    -DASCEND_INSTALL_PATH=${_ASCEND_INSTALL_PATH}
 cmake --build build --target ${FILE_NAME}_${RUN_MODE}
 if [ $? -ne 0 ]; then
     echo "ERROR: compile op on failed!"
@@ -124,7 +126,6 @@ if [ $? -ne 0 ]; then
     exit -1
 fi
 echo "INFO: execute op on ${RUN_MODE} succeed!"
-# python3 scripts/verify_result.py output/output_z.bin output/golden.bin
-python3 scripts/data_visualization.py 
+python3 scripts/data_visualization.py output/color.bin
 
 rm -rf *log *.vcd

@@ -4,7 +4,7 @@
 
 
 
-#ifndef __CCE_KT_TEST__
+#ifndef ASCENDC_CPU_DEBUG
 #include <acl/acl.h>
 extern void render_do(uint32_t coreDim, void *l2ctrl, void *stream,
                       uint8_t *rays, uint8_t *spheres,uint8_t *colors);
@@ -18,11 +18,10 @@ int main() {
     uint32_t blockDim = 8;
     uint32_t elementNums = WIDTH * HEIGHT * 4 * SAMPLES;
 
-
-#ifdef __CCE_KT_TEST__
+#ifdef ASCENDC_CPU_DEBUG
 
     size_t inputRayByteSize = elementNums * sizeof(uint32_t) * 6; // TODO: 更新为不同的数据类型Float，Half等
-    size_t inputSphereByteSize = 512; // r^2 xyz color emssion + Padding 0
+    size_t inputSphereByteSize = 512;                             // r^2 xyz color emssion + Padding 0
     size_t outputColorByteSize = elementNums * sizeof(uint32_t) * 3;
 
     uint8_t *rays = (uint8_t *)AscendC::GmAlloc(inputRayByteSize);
@@ -32,10 +31,10 @@ int main() {
     // copy data_gen
     ReadFile("./input/rays.bin", inputRayByteSize, rays, inputRayByteSize);
     ReadFile("./input/spheres.bin", inputSphereByteSize, spheres, inputSphereByteSize);
-    
+
     AscendC::SetKernelMode(KernelMode::AIV_MODE);
 
-    ICPU_RUN_KF(render, blockDim, rays,spheres, colors);
+    ICPU_RUN_KF(render, blockDim, rays, spheres, colors);
 
     // copy result
     WriteFile("./output/color.bin", colors, outputColorByteSize);
@@ -46,44 +45,36 @@ int main() {
 
 #else
     size_t inputRayByteSize = elementNums * sizeof(uint32_t) * 6; // rays
-    size_t inputSphereByteSize = 512; // r^2 xyz color emssion
+    size_t inputSphereByteSize = 512;                             // r^2 xyz color emssion
     size_t outputColorByteSize = elementNums * sizeof(uint32_t) * 3;
 
-    aclrtContext context;
+    CHECK_ACL(aclInit("./scripts/acl.json"));
     int32_t deviceId = 0;
-
     CHECK_ACL(aclrtSetDevice(deviceId));
-    CHECK_ACL(aclrtCreateContext(&context, deviceId));
     aclrtStream stream = nullptr;
     CHECK_ACL(aclrtCreateStream(&stream));
 
-    uint8_t *rayHost,*sphereHost, *colorHost;
-    uint8_t *rayDevice,*sphereDevice, *colorDevice;
+    uint8_t *rayHost, *sphereHost, *colorHost;
+    uint8_t *rayDevice, *sphereDevice, *colorDevice;
 
     CHECK_ACL(aclrtMallocHost((void **)(&rayHost), inputRayByteSize));
     CHECK_ACL(aclrtMallocHost((void **)(&sphereHost), inputSphereByteSize));
     CHECK_ACL(aclrtMallocHost((void **)(&colorHost), outputColorByteSize));
 
-    CHECK_ACL(aclrtMalloc((void **)&rayDevice, inputRayByteSize,
-                          ACL_MEM_MALLOC_HUGE_FIRST));
-    CHECK_ACL(aclrtMalloc((void **)&sphereDevice, inputSphereByteSize,
-                          ACL_MEM_MALLOC_HUGE_FIRST));
-    CHECK_ACL(aclrtMalloc((void **)&colorDevice, outputColorByteSize,
-                          ACL_MEM_MALLOC_HUGE_FIRST));
+    CHECK_ACL(aclrtMalloc((void **)&rayDevice, inputRayByteSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    CHECK_ACL(aclrtMalloc((void **)&sphereDevice, inputSphereByteSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    CHECK_ACL(aclrtMalloc((void **)&colorDevice, outputColorByteSize, ACL_MEM_MALLOC_HUGE_FIRST));
 
     ReadFile("./input/rays.bin", inputRayByteSize, rayHost, inputRayByteSize);
-    CHECK_ACL(aclrtMemcpy(rayDevice, inputRayByteSize, rayHost, inputRayByteSize,
-                          ACL_MEMCPY_HOST_TO_DEVICE));
+    CHECK_ACL(aclrtMemcpy(rayDevice, inputRayByteSize, rayHost, inputRayByteSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     ReadFile("./input/spheres.bin", inputSphereByteSize, sphereHost, inputSphereByteSize);
-    CHECK_ACL(aclrtMemcpy(rayDevice, inputSphereByteSize, sphereHost, inputSphereByteSize,
-                          ACL_MEMCPY_HOST_TO_DEVICE));
+    CHECK_ACL(aclrtMemcpy(rayDevice, inputSphereByteSize, sphereHost, inputSphereByteSize, ACL_MEMCPY_HOST_TO_DEVICE));
 
     render_do(blockDim, nullptr, stream, rayDevice,sphereDevice,colorDevice);
     CHECK_ACL(aclrtSynchronizeStream(stream));
 
-    CHECK_ACL(aclrtMemcpy(colorHost, outputColorByteSize, colorDevice,
-                          outputColorByteSize, ACL_MEMCPY_DEVICE_TO_HOST));
+    CHECK_ACL(aclrtMemcpy(colorHost, outputColorByteSize, colorDevice, outputColorByteSize, ACL_MEMCPY_DEVICE_TO_HOST));
 
     WriteFile("./output/color.bin", colorHost, outputColorByteSize);
 
@@ -96,7 +87,6 @@ int main() {
     CHECK_ACL(aclrtFreeHost(colorHost));
 
     CHECK_ACL(aclrtDestroyStream(stream));
-    CHECK_ACL(aclrtDestroyContext(context));
     CHECK_ACL(aclrtResetDevice(deviceId));
     CHECK_ACL(aclFinalize());
 

@@ -38,7 +38,7 @@ class KernelRender {
     }
 
     __aicore__ inline void Process() {
-#ifdef __CCE_KT_TEST__
+#ifdef ASCENDC_CPU_DEBUG
         // if (GetBlockIdx() == 0) {
         //     printf("core %ld\n", GetBlockIdx());
         //     auto ch = getchar();
@@ -50,7 +50,7 @@ class KernelRender {
 
         UploadSpheres();
         for (int i = 0; i < loop_count; i++) {
-            if(GetBlockIdx() == 0)
+            if (GetBlockIdx() == 0)
                 AscendC::printf("progress %d/%d\n", i, loop_count);
 
             CopyIn(i);
@@ -146,7 +146,8 @@ class KernelRender {
 
             ComputeHitInfo(hitMinT.Get(), hitIndex.Get(), rays, spheres, allocator, depth);
 
-            // DEBUG(if (cnt == 0 && depth == 1) {
+            // DEBUG(
+            // if (progress ==0 && depth == 0) {
             //     printf("bound: %d\n", depth);
             //     CPUDumpTensorU("ReduceMin Index int32_T", hitIndex.Get().ReinterpretCast<int32_t>(), GENERIC_SIZE);
             // })
@@ -161,12 +162,12 @@ class KernelRender {
             GenerateNewRays(rays, hitIndex.Get(), hitMinT.Get(), spheres, allocator, progress, depth);
 
             // DEBUG({
-                // printf("bound: %d\n", depth);
+            // printf("bound: %d\n", depth);
             //     if (cnt == 0)
             //     {
-                    // CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
-                    // CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
-                    // CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
+            // CPUDumpTensor("New ray x", rays.ox, GENERIC_SIZE);
+            // CPUDumpTensor("New ray y", rays.oy, GENERIC_SIZE);
+            // CPUDumpTensor("New ray z", rays.oz, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dx", rays.dx, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dy", rays.dy, GENERIC_SIZE);
             //         CPUDumpTensor("New ray dz", rays.dz, GENERIC_SIZE);
@@ -177,7 +178,7 @@ class KernelRender {
             AccumulateIntervalColor(ret, retMask.Get(), hitIndex.Get(), spheres, allocator, progress, depth);
 
             // DEBUG({
-            //     printf("process %d depth %d\n",progress,bound);
+            //     printf("process %d depth %d\n",progress,depth);
             //     CPUDumpTensor("Color x", ret.x, GENERIC_SIZE);
             //     CPUDumpTensor("Color y", ret.y, GENERIC_SIZE);
             //     CPUDumpTensor("Color z", ret.z, GENERIC_SIZE);
@@ -193,6 +194,11 @@ class KernelRender {
         Muls(colors.x, ret.x, Float(12), GENERIC_SIZE);
         Muls(colors.y, ret.y, Float(12), GENERIC_SIZE);
         Muls(colors.z, ret.z, Float(12), GENERIC_SIZE);
+
+        AscendC::PRINTF("progress %d\n", progress);
+        DumpTensor(colors.x, 11, 64);
+        DumpTensor(colors.y, 12, 64);
+        DumpTensor(colors.z, 13, 64);
 
         rayQueue.FreeTensor(ray);
         colorQueue.EnQue(color);
@@ -253,7 +259,7 @@ extern "C" __global__ __aicore__ void render(GM_ADDR rays, GM_ADDR spheres, GM_A
 }
 
 // npu kernel function
-#ifndef __CCE_KT_TEST__
+#ifndef ASCENDC_CPU_DEBUG
 // call of kernel function
 void render_do(uint32_t blockDim, void *l2ctrl, void *stream, uint8_t *rays, uint8_t *spheres, uint8_t *colors) {
     render<<<blockDim, l2ctrl, stream>>>(rays, spheres, colors);

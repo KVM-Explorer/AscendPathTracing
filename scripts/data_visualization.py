@@ -17,9 +17,9 @@ def write_ppm(w, h,data):
             f.write("\n")
 
 
-def decode_color(w, h, s):
+def decode_color(path,w, h, s):
     # 读取color.bin文件 数据的格式为SoA的XYZ，转化为XYZ的Array
-    colors = np.fromfile("./output/color.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
+    colors = np.fromfile(path, dtype=np.float32).reshape(3, w, h, 4 * samples)
     # colors = np.fromfile("./output/test_soa.bin", dtype=np.float32).reshape(3, w, h, 4 * samples)
 
     # print(colors.shape)
@@ -91,5 +91,10 @@ def test_decode():
 
 
 if __name__ == "__main__":
-    decode_color(width, height, samples)
-    # test_decode()
+
+    try:
+        decode_color(sys.argv[1],width, height, samples)
+        print("Generate Result Image")
+    except Exception as e:
+        print(e)
+        sys.exit(1)
