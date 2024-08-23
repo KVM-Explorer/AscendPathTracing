@@ -710,8 +710,8 @@ __aicore__ inline void AccumulateIntervalColor(VecLocalSoA &ret, AscendC::LocalT
     Duplicate(diffuseY.Get(), Float(-1), GENERIC_SIZE);
     Duplicate(diffuseZ.Get(), Float(-1), GENERIC_SIZE);
 
-    auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
-    Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
+    // auto srcOffsetLocal = AllocDecorator(allocator.Alloc(GENERIC_SIZE));
+    // Muls(srcOffsetLocal.Get().ReinterpretCast<int32_t>(), hitIndex.ReinterpretCast<int32_t>(), int32_t(sizeof(Float)), GENERIC_SIZE);
 
     // Gather(diffuseX.Get(), spheres.colorX, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
     // Gather(diffuseY.Get(), spheres.colorY, srcOffsetLocal.Get().ReinterpretCast<uint32_t>(), 0, GENERIC_SIZE);
