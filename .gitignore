@@ -45,3 +45,7 @@ cceprint
 .vscode/compile_commands.json
 
 *.log
+out/
+ascendc_kernels_bbit
+sim_log/
+simlog/
