@@ -14,7 +14,7 @@ NPU版本的算子无法支持常见系统库函数，CCE编译器缺少对应�
 2.  在当前操作系统安装Docker环境
 3.  生成docker容器环境
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Demo运行
