@@ -17,26 +17,28 @@ CMD ["/sbin/my_init"]
 RUN seq 1 8 | xargs -I{} sed -i 's/archive.ubuntu.com/mirrors.nju.edu.cn/g' /etc/apt/sources.list 
 RUN seq 1 8 | xargs -I{} sed -i 's/security.ubuntu.com/mirrors.nju.edu.cn/g' /etc/apt/sources.list
 
-RUN apt update && apt-get install -y gcc g++ make cmake zlib1g zlib1g-dev openssl libsqlite3-dev libssl-dev libffi-dev unzip pciutils net-tools libblas-dev gfortran libblas3 python3-pip
+RUN add-apt-repository ppa:xmake-io/xmake && apt update && apt-get install -y gcc g++ make cmake zlib1g zlib1g-dev openssl libsqlite3-dev libssl-dev libffi-dev unzip pciutils net-tools libblas-dev gfortran libblas3 python3-pip git xmake
 
-RUN pip3 install attrs numpy decorator sympy cffi pyyaml pathlib2 psutil protobuf scipy requests absl-py wheel typing_extensions -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+
+RUN pip3 install attrs numpy decorator sympy cffi pyyaml pathlib2 psutil protobuf scipy requests absl-py wheel typing_extensions -i https://mirrors.nju.edu.cn/pypi/web/simple/
 
 
 # 将当前文件夹内数据拷贝到镜像
-ADD . /root/workspace/
+ADD ./env /root/workspace/
 
 # 进入到/root/目录
 WORKDIR /root/workspace/
 
 # 安装Env下的run.sh
 
-RUN cd ./env && \
-    chmod +x ./*.run && \
+RUN chmod +x ./*.run && \
     ./*.run --quiet --install 
 # 更新环境变量 
 RUN echo "source /usr/local/Ascend/ascend-toolkit/set_env.sh" >> /etc/profile
 
 RUN echo "export ASCEND_INSTALL_PATH=/usr/local/Ascend/ascend-toolkit/latest" >> /etc/profile
 
+RUN git clone https://github.com/KVM-Explorer/AscendPathTracing.git
 # 当完成后,清除APT.
 # RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
