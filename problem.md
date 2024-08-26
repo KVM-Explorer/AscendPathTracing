@@ -1,3 +1,9 @@
+
+- 测试环境为cann-toolkit 8.0RC2,
+- 测试平台
+  - Windows x64
+  - Atlas 200I DK arm
+
 ## Compare
 
 Atlas 200I DK Compare API CPU模拟版本中没有解决nan和其他数值的比较的问题，按理应该返回false,实际场景如下比较ret>eps的结果，返回false则赋予1e20否则结果是ret
